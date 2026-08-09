@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Mario & Garfield Arcade Vault</title>
-  <!-- CSV Parser Library -->
+  <title>Arcade Vault: All Games</title>
+  <!-- CSV Parser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <style>
     body {
@@ -11,44 +11,86 @@
       color: #00f0ff;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       padding: 20px;
+      margin: 0;
+    }
+    .header-container {
+      position: sticky;
+      top: 0;
+      background: #0e0e17;
+      padding: 15px 0;
+      border-bottom: 2px solid #ff0055;
+      text-align: center;
+      z-index: 100;
     }
     h1 {
       color: #ff0055;
       text-shadow: 0 0 10px #ff0055;
-      text-align: center;
+      margin: 0 0 10px 0;
+    }
+    .btn-random {
+      background-color: #ff0055;
+      color: #ffffff;
+      border: none;
+      padding: 12px 24px;
+      font-size: 1rem;
+      font-weight: bold;
+      border-radius: 5px;
+      cursor: pointer;
+      box-shadow: 0 0 12px #ff0055;
+      transition: transform 0.2s, background-color 0.2s;
+    }
+    .btn-random:hover {
+      background-color: #ff2a75;
+      transform: scale(1.05);
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 15px;
-      margin-top: 20px;
+      margin-top: 25px;
+      padding: 0 10px;
     }
     .card {
       background: #181826;
-      border: 2px solid #ff0055;
+      border: 2px solid #33334d;
       border-radius: 8px;
       padding: 15px;
-      box-shadow: 0 0 8px rgba(255, 0, 85, 0.4);
+      transition: all 0.3s ease;
     }
     .card h3 {
       margin: 0 0 10px;
       color: #ffffff;
-      font-size: 1.1rem;
+      font-size: 1rem;
     }
     .platform {
       color: #ffcc00;
       font-weight: bold;
     }
+    /* Highlight effect for the random game selection */
+    .card.selected {
+      border-color: #00ffcc;
+      box-shadow: 0 0 20px #00ffcc;
+      transform: scale(1.08);
+      background: #1f2738;
+    }
   </style>
 </head>
 <body>
 
-  <h1>ARCADE GAME DATABASE</h1>
-  <div class="grid" id="game-list">Loading games...</div>
+  <div class="header-container">
+    <h1>ALL ARCADE GAMES</h1>
+    <button class="btn-random" onclick="pickRandomGame()">🎲 PICK RANDOM GAME</button>
+  </div>
+
+  <div class="grid" id="game-list">Loading full catalog...</div>
 
   <script>
-    // Reads vgsales.csv from your repository
-    fetch('vgsales.csv')
+    let allGamesData = [];
+
+    // Dataset source link
+    const csvUrl = 'https://raw.githubusercontent.com/skandavivek/webscraping-vgsales/master/vgsales.csv';
+
+    fetch(csvUrl)
       .then(res => res.text())
       .then(csvData => {
         Papa.parse(csvData, {
@@ -57,24 +99,43 @@
             const container = document.getElementById('game-list');
             container.innerHTML = '';
             
-            // Filters only games with "Mario" or "Garfield" in the name
-            const filtered = results.data.filter(game => 
-              game.Name && /Mario|Garfield/i.test(game.Name)
-            );
+            // Store valid games
+            allGamesData = results.data.filter(game => game.Name);
 
-            filtered.forEach(game => {
+            // Render EVERY game in the dataset
+            allGamesData.forEach((game, index) => {
               const card = document.createElement('div');
               card.className = 'card';
+              card.id = `game-card-${index}`;
               card.innerHTML = `
                 <h3>${game.Name}</h3>
-                <p>Platform: <span class="platform">${game.Platform}</span></p>
-                <p>Global Sales: ${game.Global_Sales}M</p>
+                <p>Platform: <span class="platform">${game.Platform || 'N/A'}</span></p>
+                <p>Global Sales: ${game.Global_Sales || 'N/A'}M</p>
               `;
               container.appendChild(card);
             });
           }
         });
       });
+
+    function pickRandomGame() {
+      if (allGamesData.length === 0) return;
+
+      // Clear previous selection highlight
+      const previouslySelected = document.querySelector('.card.selected');
+      if (previouslySelected) {
+        previouslySelected.classList.remove('selected');
+      }
+
+      // Pick random index
+      const randomIndex = Math.floor(Math.random() * allGamesData.length);
+      const selectedCard = document.getElementById(`game-card-${randomIndex}`);
+
+      if (selectedCard) {
+        selectedCard.classList.add('selected');
+        selectedCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
   </script>
 
 </body>
