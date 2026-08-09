@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Arcade Vault: All Games</title>
+  <title>Arcade Game Vault</title>
   <!-- CSV Parser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <style>
@@ -10,36 +10,37 @@
       background-color: #0e0e17;
       color: #00f0ff;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      padding: 20px;
+      padding: 0;
       margin: 0;
     }
-    .header-container {
+    .header {
       position: sticky;
       top: 0;
-      background: #0e0e17;
-      padding: 15px 0;
-      border-bottom: 2px solid #ff0055;
+      background: #141422;
+      padding: 15px;
       text-align: center;
-      z-index: 100;
+      border-bottom: 2px solid #ff0055;
+      z-index: 1000;
+      box-shadow: 0 4px 15px rgba(255, 0, 85, 0.3);
     }
     h1 {
       color: #ff0055;
-      text-shadow: 0 0 10px #ff0055;
       margin: 0 0 10px 0;
+      text-shadow: 0 0 10px #ff0055;
     }
-    .btn-random {
+    button {
       background-color: #ff0055;
-      color: #ffffff;
+      color: white;
       border: none;
       padding: 12px 24px;
-      font-size: 1rem;
+      font-size: 16px;
       font-weight: bold;
-      border-radius: 5px;
+      border-radius: 6px;
       cursor: pointer;
-      box-shadow: 0 0 12px #ff0055;
-      transition: transform 0.2s, background-color 0.2s;
+      box-shadow: 0 0 10px #ff0055;
+      transition: all 0.2s ease;
     }
-    .btn-random:hover {
+    button:hover {
       background-color: #ff2a75;
       transform: scale(1.05);
     }
@@ -47,8 +48,7 @@
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 15px;
-      margin-top: 25px;
-      padding: 0 10px;
+      padding: 20px;
     }
     .card {
       background: #181826;
@@ -66,10 +66,9 @@
       color: #ffcc00;
       font-weight: bold;
     }
-    /* Highlight effect for the random game selection */
     .card.selected {
       border-color: #00ffcc;
-      box-shadow: 0 0 20px #00ffcc;
+      box-shadow: 0 0 25px #00ffcc;
       transform: scale(1.08);
       background: #1f2738;
     }
@@ -77,63 +76,60 @@
 </head>
 <body>
 
-  <div class="header-container">
-    <h1>ALL ARCADE GAMES</h1>
-    <button class="btn-random" onclick="pickRandomGame()">🎲 PICK RANDOM GAME</button>
+  <div class="header">
+    <h1>ARCADE GAME DATABASE</h1>
+    <button onclick="pickRandomGame()">🎲 PICK RANDOM GAME</button>
   </div>
 
-  <div class="grid" id="game-list">Loading full catalog...</div>
+  <div class="grid" id="game-list">Loading games...</div>
 
   <script>
-    let allGamesData = [];
+    let games = [];
 
-    // Dataset source link
-    const csvUrl = 'https://raw.githubusercontent.com/skandavivek/webscraping-vgsales/master/vgsales.csv';
+    // Real dataset fetched directly
+    const dataUrl = 'https://raw.githubusercontent.com/skandavivek/webscraping-vgsales/master/vgsales.csv';
 
-    fetch(csvUrl)
+    fetch(dataUrl)
       .then(res => res.text())
-      .then(csvData => {
-        Papa.parse(csvData, {
+      .then(csv => {
+        Papa.parse(csv, {
           header: true,
           complete: (results) => {
             const container = document.getElementById('game-list');
             container.innerHTML = '';
             
-            // Store valid games
-            allGamesData = results.data.filter(game => game.Name);
+            games = results.data.filter(g => g.Name);
 
-            // Render EVERY game in the dataset
-            allGamesData.forEach((game, index) => {
+            games.forEach((game, index) => {
               const card = document.createElement('div');
               card.className = 'card';
-              card.id = `game-card-${index}`;
+              card.id = `game-${index}`;
               card.innerHTML = `
                 <h3>${game.Name}</h3>
                 <p>Platform: <span class="platform">${game.Platform || 'N/A'}</span></p>
-                <p>Global Sales: ${game.Global_Sales || 'N/A'}M</p>
+                <p>Sales: ${game.Global_Sales || 'N/A'}M</p>
               `;
               container.appendChild(card);
             });
           }
         });
+      })
+      .catch(err => {
+        document.getElementById('game-list').innerHTML = '<p>Error loading game data.</p>';
       });
 
     function pickRandomGame() {
-      if (allGamesData.length === 0) return;
+      if (!games.length) return;
 
-      // Clear previous selection highlight
-      const previouslySelected = document.querySelector('.card.selected');
-      if (previouslySelected) {
-        previouslySelected.classList.remove('selected');
-      }
+      const prev = document.querySelector('.card.selected');
+      if (prev) prev.classList.remove('selected');
 
-      // Pick random index
-      const randomIndex = Math.floor(Math.random() * allGamesData.length);
-      const selectedCard = document.getElementById(`game-card-${randomIndex}`);
+      const randomIndex = Math.floor(Math.random() * games.length);
+      const card = document.getElementById(`game-${randomIndex}`);
 
-      if (selectedCard) {
-        selectedCard.classList.add('selected');
-        selectedCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (card) {
+        card.classList.add('selected');
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }
   </script>
