@@ -3,8 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <title>Arcade Game Vault</title>
-  <!-- CSV Parser -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
   <style>
     body {
       background-color: #0e0e17;
@@ -81,46 +79,45 @@
     <button onclick="pickRandomGame()">🎲 PICK RANDOM GAME</button>
   </div>
 
-  <div class="grid" id="game-list">Loading games...</div>
+  <div class="grid" id="game-list"></div>
 
   <script>
-    let games = [];
+    // Embedded game list (Runs natively without fetching external files)
+    const games = [
+      { name: "Super Mario Bros.", platform: "NES", sales: "40.24M" },
+      { name: "Mario Kart 8 Deluxe", platform: "Switch", sales: "52.00M" },
+      { name: "Garfield Kart", platform: "3DS", sales: "0.15M" },
+      { name: "Garfield Kart: Furious Racing", platform: "PC", sales: "0.42M" },
+      { name: "Super Mario World", platform: "SNES", sales: "20.61M" },
+      { name: "Super Mario 64", platform: "N64", sales: "11.89M" },
+      { name: "Mario Kart Wii", platform: "Wii", sales: "35.82M" },
+      { name: "New Super Mario Bros.", platform: "DS", sales: "29.80M" },
+      { name: "Super Mario Odyssey", platform: "Switch", sales: "25.76M" },
+      { name: "Pac-Man", platform: "Arcade", sales: "10.00M" },
+      { name: "Space Invaders", platform: "Arcade", sales: "6.00M" },
+      { name: "Donkey Kong", platform: "Arcade", sales: "5.50M" },
+      { name: "Street Fighter II", platform: "Arcade", sales: "6.30M" },
+      { name: "Mortal Kombat", platform: "Arcade", sales: "3.00M" },
+      { name: "Galaga", platform: "Arcade", sales: "4.50M" },
+      { name: "Asteroids", platform: "Arcade", sales: "4.30M" }
+    ];
 
-    // Real dataset fetched directly
-    const dataUrl = 'https://raw.githubusercontent.com/skandavivek/webscraping-vgsales/master/vgsales.csv';
+    const container = document.getElementById('game-list');
 
-    fetch(dataUrl)
-      .then(res => res.text())
-      .then(csv => {
-        Papa.parse(csv, {
-          header: true,
-          complete: (results) => {
-            const container = document.getElementById('game-list');
-            container.innerHTML = '';
-            
-            games = results.data.filter(g => g.Name);
-
-            games.forEach((game, index) => {
-              const card = document.createElement('div');
-              card.className = 'card';
-              card.id = `game-${index}`;
-              card.innerHTML = `
-                <h3>${game.Name}</h3>
-                <p>Platform: <span class="platform">${game.Platform || 'N/A'}</span></p>
-                <p>Sales: ${game.Global_Sales || 'N/A'}M</p>
-              `;
-              container.appendChild(card);
-            });
-          }
-        });
-      })
-      .catch(err => {
-        document.getElementById('game-list').innerHTML = '<p>Error loading game data.</p>';
-      });
+    // Display games immediately
+    games.forEach((game, index) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.id = `game-${index}`;
+      card.innerHTML = `
+        <h3>${game.name}</h3>
+        <p>Platform: <span class="platform">${game.platform}</span></p>
+        <p>Sales: ${game.sales}</p>
+      `;
+      container.appendChild(card);
+    });
 
     function pickRandomGame() {
-      if (!games.length) return;
-
       const prev = document.querySelector('.card.selected');
       if (prev) prev.classList.remove('selected');
 
