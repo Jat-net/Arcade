@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>KILLA CLANKAS — Robot Arena</title>
+<title>KILLA CLANKAS</title>
 <style>
   :root { --amber:#ffa524; --ink:#0b0c0e; }
   * { box-sizing:border-box; }
@@ -2545,6 +2545,19 @@ window.addEventListener('error', function (e) {
 window.addEventListener('unhandledrejection', function (e) {
   console.error('[Arcade promise error]', e.reason);
 });
+
+\nconst __killaStartBtn = document.getElementById('startBtn');
+if (__killaStartBtn) {
+  __killaStartBtn.addEventListener('click', () => {
+    try {
+      start();
+      const title = document.getElementById('title');
+      if (title) title.classList.remove('on');
+    } catch (e) {
+      console.error('KILLA CLANKAS start failed:', e);
+    }
+  });
+}
 </script>
 
 </body>
