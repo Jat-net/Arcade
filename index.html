@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>SCRAPYARD — Robot Arena</title>
+<title>KILLA CLANKAS — Robot Arena</title>
 <style>
   :root { --amber:#ffa524; --ink:#0b0c0e; }
   * { box-sizing:border-box; }
@@ -50,12 +50,12 @@
   <div id="marks"></div>
   <div id="toast"></div>
   <div id="prompt"></div>
-  <div id="mercyPopup"><b>EVERY ROBOT IS BEGGING</b><span>Press <strong>T</strong> to spare them — or keep fighting.</span></div>
+  <span>Press <strong>T</strong> to spare them — or keep fighting.</span></div>
   <div id="stats">WAVE <b id="wave">1</b> &nbsp; KILLS <b id="kills">0</b> &nbsp; ARMOR <b id="armor">0%</b> &nbsp; BEST <b id="best">0</b></div>
 </div>
 
 <div class="ov on" id="title"><div class="panel">
-  <h1>KILLA CLANKERS</h1>
+  <h1>KILLA CLANKAS</h1>
   <p>Physics-driven sword combat. Your blade goes exactly where your mouse goes.</p>
   <ul>
     <li><b>Mouse</b> — moves the blade. Centered = point forward. Push left/right = raised guard on that side. Up = raise/cock behind shoulder. Down = point at ground.</li>
@@ -87,7 +87,7 @@
   .beg-bubble:after{content:"";position:absolute;left:50%;bottom:-8px;margin-left:-7px;border:7px solid transparent;border-top-color:rgba(255,255,255,.82);border-bottom:0}
   .beg-bubble .asg{color:#4da3ff;font-weight:900;letter-spacing:.08em}.beg-name{display:block;font-size:9px;letter-spacing:.08em;opacity:.72;margin-bottom:3px}
 </style>
-<div id="begBubbles"></div>
+
 <div id="err"><div><h2>Cannot load engine</h2><p id="errmsg">Three.js / Rapier could not be fetched from the CDN. This file needs a network connection the first time it runs.</p></div></div>
 
 <script type="module">
@@ -738,7 +738,6 @@ const ROBOT_TYPES=[
 function chooseRobotType(wave){const pool=wave<2?ROBOT_TYPES.slice(0,2):ROBOT_TYPES;return pool[Math.floor(Math.random()*pool.length)];}
 function spawnRobot(x,z,wave){
   const tier=1+(wave-1)*.14,type=chooseRobotType(wave),rig=makeRig(MAT.bot,MAT.botHot);rig.root.scale.setScalar(type.scale);scene.add(rig.root);
-  const r={rig,type,parts:{},dead:false,hp:260*tier*type.hp,maxHp:260*tier*type.hp,pos:new THREE.Vector3(x,0,z),vel:new THREE.Vector3(),yaw:0,state:'approach',t:Math.random()*2,atk:0,phase:0,stagger:0,block:0,crippled:false,walk:Math.random()*6,bob:0,speed:type.speed+Math.min(1.8,wave*.08),aggr:Math.min(1,type.aggr+wave*.025),armor:Math.min(.68,type.armor+(wave-1)*.035),reach:WEAPONS[type.weapon].len+.55,hitFlag:0,power:type.power,weaponName:type.weapon,hasWeapon:true,swordDropped:false,surrender:false,surrenderStage:'fall',surrenderHit:0,fallSide:(Math.random()<0.5?-1:1),flee:false,mercyHit:false,begCd:0,begHitTimer:0,begLine:'',begBubble:null,voiceIndex:0,voiceKey:Math.floor(Math.random()*1000000),damageDone:0,lastBegThreat:0,ko:false,koTimer:0,koRag:null,bruise:0,headBonk:0,neckReact:false,neckTimer:0,fistAttempts:0,fistHits:0,weaponPickupTarget:null,knock:new THREE.Vector3(),staggerMag:0,pose:{},poseTarget:{}};
   // one kinematic collider per bone, driven by the rig
   for (const name in BONE) {
     const b = BONE[name];
@@ -1314,7 +1313,6 @@ function equipRobotWeapon(r,p){if(r.dead||r.surrender||r.hasWeapon||!p||!pickups
 function killRobot(r, dirHint, forceMag) {
   if (r.dead) return;
   r.dead = true; S.kills++;
-  if(r.begBubble){r.begBubble.remove();r.begBubble=null;}
   dropBotSword(r);
   forceMag = forceMag || 1;
   // Death is a genuine ragdoll: every remaining bone becomes a jointed dynamic
@@ -1799,7 +1797,6 @@ function robotBeg(r, urgent=false){
   r.begLine=(frantic ? franticPool : pool)[Math.floor(Math.random()*(frantic?franticPool.length:pool.length))];
   r.begCd=frantic?0.45:2.3;
   // Speech synthesis intentionally removed; the robot communicates through animation + text bubble.
-  if(r.begBubble){r.begBubble.remove();r.begBubble=null;}
   const b=document.createElement('div');
   b.className='beg-bubble';
   const safe = String(r.begLine).replace(/<[^>]*>/g,'');
@@ -1807,7 +1804,6 @@ function robotBeg(r, urgent=false){
   let html='<span class="beg-name">'+r.type.name+'</span>';
   for(let i=0;i<parts.length;i++){ html += parts[i]; if(i<parts.length-1) html += '<span class="asg">ASG</span>'; }
   b.innerHTML=html;
-  document.body.appendChild(b);r.begBubble=b;
 }
 function beginSurrender(r){
   if(r.dead||r.surrender||r.flee)return;
@@ -2006,7 +2002,6 @@ function stepAI(dt) {
       r.pos.addScaledVector(r.vel,dt);
       if(Math.abs(r.pos.x)>ARENA+4 || Math.abs(r.pos.z)>ARENA+4){
         r.dead=true;
-        if(r.begBubble){r.begBubble.remove();r.begBubble=null;}
         if(r.swordBody){dropBody(r.swordBody,r.swordCol);r.swordBody=null;}
         if(r.swordMesh){scene.remove(r.swordMesh);r.swordMesh=null;}
         scene.remove(r.rig.root);
@@ -2447,21 +2442,16 @@ function updateMarks() {
 const CAM = { dist: 4.08, height: 1.62, tilt: 0.24 };
 const camFocus = new THREE.Vector3(0, 1.9, 8);
 const camQ2 = new THREE.Quaternion(), _v3 = new THREE.Vector3();
-function updateBegBubbles(){
-  const holder=$('begBubbles');
   const pp=player.body.translation();
   const active=new Set();
   for(const r of robots){
     if(r.dead||!r.surrender) continue;
     const d=Math.hypot(r.pos.x-pp.x,r.pos.z-pp.z);
     if(d>22) continue;
-    if(!r.begBubble){
       const el=document.createElement('div'); el.className='beg-bubble';
       const name=document.createElement('span'); name.className='beg-name'; el.appendChild(name);
       const text=document.createElement('span'); el.appendChild(text);
-      r.begBubble=el; holder.appendChild(el);
     }
-    const el=r.begBubble; active.add(el); el.style.display='block';
     el.firstChild.textContent=r.type.name;
     el.lastChild.textContent=r.begLine||'Please... mercy!';
     const v=new THREE.Vector3(r.pos.x,r.bob+2.05,r.pos.z).project(camera);
@@ -2469,7 +2459,6 @@ function updateBegBubbles(){
     el.style.left=x+'px'; el.style.top=y+'px';
     el.style.opacity=String(clamp(1-(d-4)/18,.15,1));
   }
-  for(const r of robots) if(r.begBubble && !active.has(r.begBubble)){ r.begBubble.remove(); r.begBubble=null; }
 }
 
 let acc = 0, last = performance.now();
@@ -2500,7 +2489,6 @@ function frame(now) {
     camFocus.y + _v3.y + CAM.height + (Math.random() - 0.5) * shake,
     camFocus.z + _v3.z + (Math.random() - 0.5) * shake);
   camera.rotation.set(player.pitch - CAM.tilt, player.yaw, player.lean, 'YXZ');
-  updateBegBubbles();
 
   // sword mesh + hero rig gripping it
   const st = sword.body.translation(), sr = sword.body.rotation();
