@@ -735,7 +735,26 @@ const ROBOT_TYPES=[
 ];
 function chooseRobotType(wave){const pool=wave<2?ROBOT_TYPES.slice(0,2):ROBOT_TYPES;return pool[Math.floor(Math.random()*pool.length)];}
 function spawnRobot(x,z,wave){
-  const tier=1+(wave-1)*.14,type=chooseRobotType(wave),rig=makeRig(MAT.bot,MAT.botHot);rig.root.scale.setScalar(type.scale);scene.add(rig.root);
+  const tier=1+(wave-1)*0.14,type=chooseRobotType(wave),rig=makeRig(MAT.bot,MAT.botHot);
+  rig.root.scale.setScalar(type.scale);
+  scene.add(rig.root);
+
+  // Full robot state. This object was accidentally removed from the previous
+  // GitHub build, which left the spawned rig with no AI/physics state.
+  const r = {
+    rig, parts:{}, dead:false, hp:260*tier*type.hp, maxHp:260*tier*type.hp,
+    pos:new THREE.Vector3(x,0,z), vel:new THREE.Vector3(), knock:new THREE.Vector3(),
+    yaw:Math.atan2(-x,-z), state:'approach', t:Math.random()*2,
+    atk:0, phase:0, stagger:0, block:0, crippled:false,
+    walk:Math.random()*6, bob:0, speed:type.speed,
+    aggr:type.aggr, armor:type.armor, reach:2.1, hitFlag:0,
+    staggerMag:0, pose:{}, poseTarget:{},
+    weaponName:type.weapon || 'longsword', hasWeapon:true, swordDropped:false,
+    weaponDisarmedTimer:0, weaponPickupTarget:null, attackStyle:Math.random()<0.5?'left':'right',
+    clashCd:0, attackHitDone:false, fistAttempts:0, fistHits:0,
+    damageDone:0, tSinceAttack:0, headBonk:0, neckReact:false, neckTimer:0,
+    ko:false, flee:false, surrender:false, begCd:0, begHitTimer:0,
+  };
   // one kinematic collider per bone, driven by the rig
   for (const name in BONE) {
     const b = BONE[name];
@@ -753,7 +772,7 @@ function spawnRobot(x,z,wave){
   // pose channels (euler x,z per joint) - lerped toward poseTarget
   for (const k of ['shR','elR','shL','elL','spine','headY','hipL','hipR','kneeL','kneeR']) { r.pose[k] = 0; r.poseTarget[k] = 0; }
 
-  // their sword, kinematic, welded to the right hand
+  // enemy sword: dynamic physics body, physically driven toward the robot hand
   const c = WEAPONS[r.weaponName];
   r.swordCfg = c;
   r.swordMesh = buildBladeMesh(c); scene.add(r.swordMesh);
@@ -1775,10 +1794,6 @@ function stepAI(dt) {
     r.headBonk=Math.max(0,r.headBonk-dt);
     if (r.begCd > 0) r.begCd -= dt;
     if (r.begHitTimer > 0) r.begHitTimer -= dt;
-    if (r.surrender) {
-      const tip=sword.tipVel.length();
-      const threat=Math.hypot(sword.tip.x-r.pos.x,sword.tip.z-r.pos.z);
-    }
     for (const nm in r.parts) { const p = r.parts[nm]; if (p.hitCd > 0) p.hitCd -= dt; }
     r.clashCd = Math.max(0, (r.clashCd || 0) - dt);
     r.t += dt;
@@ -1854,8 +1869,7 @@ function stepAI(dt) {
 
     // --- arm pose targets per state (sword stays in hand, always) -----
     const T = r.poseTarget;
-    if (r.surrender) { const k=Math.min(1,r.phase/0.9); T.shR=-0.25; T.elR=0.75; T.shL=-0.25; T.elL=0.75; T.spine=0.75*k; T.headY=0.15; T.hipL=0.9*k; T.hipR=0.9*k; T.kneeL=-1.35*k; T.kneeR=-1.35*k; }
-    else if (r.flee) { T.shR=-0.9; T.elR=-0.6; T.shL=-0.9; T.elL=-0.6; T.spine=-0.05; }
+    if (r.flee) { T.shR=-0.9; T.elR=-0.6; T.shL=-0.9; T.elL=-0.6; T.spine=-0.05; }
     if (!r.surrender&&!r.flee&&r.state === 'windup') {
       const k = r.phase / ATK.windup;
       if(!r.hasWeapon){ T.shR = -1.05; T.elR = -0.75; T.shL = -0.85; T.elL = -0.7; T.spine = -0.08*k; }
@@ -2170,7 +2184,7 @@ const LOCK_RANGE = 15, LOCK_TURN_MAX = 4.0;
 let lockTarget = null;
 let dHold=0, dCycleCooldown=0;
 function updateLock(dt) {
-  if (lockTarget && (lockTarget.dead || lockTarget.surrender || lockTarget.ko)) lockTarget = null;
+  if (lockTarget && (lockTarget.dead || lockTarget.ko)) lockTarget = null;
   const pt = player.body.translation();
   if (dCycleCooldown > 0) dCycleCooldown -= dt;
   if (keys.has('KeyD')) dHold += dt; else dHold = 0;
