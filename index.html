@@ -100,13 +100,16 @@ async function bootstrapKillaClankas() {
 
     let rapierErr;
     for (const url of [
-      'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier3d-compat.es.js',
-      'https://unpkg.com/@dimforge/rapier3d-compat@0.14.0/rapier3d-compat.es.js'
+      'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/+esm',
+      'https://unpkg.com/@dimforge/rapier3d-compat@0.14.0/+esm'
     ]) {
       try { RAPIER = await import(url); RAPIER = RAPIER.default ?? RAPIER; break; } catch (e) { rapierErr = e; }
     }
     if (!RAPIER) throw rapierErr || new Error('Rapier failed to load');
-    await RAPIER.init();
+    await Promise.race([
+      RAPIER.init(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Rapier physics engine timed out while loading')), 20000))
+    ]);
     startBtn.disabled = false;
     startBtn.textContent = 'ENTER THE ARENA';
     window.dispatchEvent(new Event('killa-engine-ready'));
