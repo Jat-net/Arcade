@@ -62,7 +62,7 @@
     <li><b>Power-ups drop from every robot you kill</b> — plates, repair cells, heavy arms, servos and new weapons — walk over them to bolt on protection or patch up.</li>
     <li><b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>Space</b> jump &middot; <b>Q/R</b> lean &middot; <b>C</b> crouch &middot; <b>F</b> kick &middot; <b>E</b> pick up weapons &middot; <b>Esc</b> pause</li>
   </ul>
-  <button id="startBtn">ENTER THE ARENA</button>
+  <button id="startBtn" disabled>LOADING ENGINE...</button>
 </div></div>
 
 <div class="ov" id="pause"><div class="panel">
@@ -84,22 +84,40 @@
 let THREE, RAPIER;
 
 async function bootstrapKillaClankas() {
+  const startBtn = document.getElementById('startBtn');
+  const err = document.getElementById('err');
+  const msg = document.getElementById('errmsg');
   try {
-    THREE = await import('https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js');
-    const R = await import('https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/+esm');
-    RAPIER = R.default ?? R;
+    // Use explicit ESM entry points that work reliably from GitHub Pages.
+    let threeErr;
+    for (const url of [
+      'https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js',
+      'https://unpkg.com/three@0.169.0/build/three.module.js'
+    ]) {
+      try { THREE = await import(url); break; } catch (e) { threeErr = e; }
+    }
+    if (!THREE) throw threeErr || new Error('Three.js failed to load');
+
+    let rapierErr;
+    for (const url of [
+      'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier3d-compat.es.js',
+      'https://unpkg.com/@dimforge/rapier3d-compat@0.14.0/rapier3d-compat.es.js'
+    ]) {
+      try { RAPIER = await import(url); RAPIER = RAPIER.default ?? RAPIER; break; } catch (e) { rapierErr = e; }
+    }
+    if (!RAPIER) throw rapierErr || new Error('Rapier failed to load');
     await RAPIER.init();
+    startBtn.disabled = false;
+    startBtn.textContent = 'ENTER THE ARENA';
     window.dispatchEvent(new Event('killa-engine-ready'));
   } catch (e) {
-    const err = document.getElementById('err');
-    const msg = document.getElementById('errmsg');
+    startBtn.disabled = true;
+    startBtn.textContent = 'ENGINE FAILED TO LOAD';
     if (err) err.style.display = 'grid';
-    if (msg) msg.textContent = 'Engine load failed: ' + e.message;
+    if (msg) msg.textContent = 'Engine load failed. Reload the GitHub Pages site and make sure JavaScript/CDN access is allowed. ' + (e?.message || e);
     console.error(e);
   }
 }
-bootstrapKillaClankas();
-
 window.addEventListener('killa-engine-ready', () => {
 /* ---------------------------------------------------------------- config */
 const FIXED = 1 / 60;
@@ -2392,6 +2410,7 @@ window.__dbg = () => ({
   handR: heroRig.nodes.handR.getWorldPosition(new THREE.Vector3()).toArray().map(n => +n.toFixed(2)),
   robots: robots.length, alive: robots.filter(r => !r.dead).length, hp: +player.hp.toFixed(1),
 });
+bootstrapKillaClankas();
 });
 </script>
 
