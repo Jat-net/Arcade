@@ -751,7 +751,7 @@ function spawnRobot(x,z,wave){
     weaponDisarmedTimer:0, weaponPickupTarget:null, attackStyle:Math.random()<0.5?'left':'right',
     clashCd:0, attackHitDone:false, fistAttempts:0, fistHits:0,
     damageDone:0, tSinceAttack:0, headBonk:0, neckReact:false, neckTimer:0,
-    ko:false, flee:false, surrender:false, begCd:0, begHitTimer:0,
+    ko:false, flee:false,
   };
   // one kinematic collider per bone, driven by the rig
   for (const name in BONE) {
@@ -768,7 +768,6 @@ function spawnRobot(x,z,wave){
     r.parts[name] = part;
   }
   // pose channels (euler x,z per joint) - lerped toward poseTarget
-  for (const k of ['shR','elR','shL','elL','spine','headY','hipL','hipR','kneeL','kneeR']) { r.pose[k] = 0; r.poseTarget[k] = 0; }
 
   // enemy sword: dynamic physics body, physically driven toward the robot hand
   const c = WEAPONS[r.weaponName];
@@ -867,16 +866,11 @@ function poseRobot(r, dt) {
   n.shinR.rotation.set(Math.max(0, gait) * 0.9 + 0.08, 0, 0);
   n.footL.rotation.set(-gait * 0.25, 0, 0);
   n.footR.rotation.set(gait * 0.25, 0, 0);
-  if (r.surrender) {
-    // Surrender is deliberately not a teleport-to-knees. It has three readable
-    // beats: collapse, recover, then kneel and beg.
     const fall = clamp(r.phase / 0.58, 0, 1);
     const recover = clamp((r.phase - 0.48) / 0.55, 0, 1);
-    const kneel = clamp((r.phase - 0.88) / 0.72, 0, 1);
     const fallEase = fall * fall * (3 - 2 * fall);
     const recoverEase = recover * recover * (3 - 2 * recover);
-    const kneelEase = kneel * kneel * (3 - 2 * kneel);
-    const hitFlinch = r.begHitTimer > 0 ? Math.sin((r.begHitTimer/0.65)*Math.PI) : 0;
+    const hitFlinch = 0;
 
     // Collapse sideways/forward onto the ground first.
     n.pelvis.position.y = THREE.MathUtils.lerp(0.95, 0.34, fallEase);
@@ -897,18 +891,6 @@ function poseRobot(r, dt) {
     n.pelvis.rotation.x = THREE.MathUtils.lerp(n.pelvis.rotation.x, 0.65, recoverEase);
 
     // Finally settle onto both knees with raised hands.
-    n.pelvis.position.y = THREE.MathUtils.lerp(n.pelvis.position.y, 0.72, kneelEase);
-    n.pelvis.rotation.x = THREE.MathUtils.lerp(n.pelvis.rotation.x, 0.95, kneelEase);
-    n.pelvis.rotation.z = THREE.MathUtils.lerp(n.pelvis.rotation.z, 0, kneelEase);
-    n.thighL.rotation.x = THREE.MathUtils.lerp(n.thighL.rotation.x, -1.05, kneelEase);
-    n.thighR.rotation.x = THREE.MathUtils.lerp(n.thighR.rotation.x, -1.05, kneelEase);
-    n.shinL.rotation.x = THREE.MathUtils.lerp(n.shinL.rotation.x, 1.55, kneelEase);
-    n.shinR.rotation.x = THREE.MathUtils.lerp(n.shinR.rotation.x, 1.55, kneelEase);
-    n.torso.rotation.x = THREE.MathUtils.lerp(n.torso.rotation.x, 0.55, kneelEase);
-    n.upperArmL.rotation.set(THREE.MathUtils.lerp(n.upperArmL.rotation.x,-0.9,kneelEase),0,0.35);
-    n.upperArmR.rotation.set(THREE.MathUtils.lerp(n.upperArmR.rotation.x,-0.9,kneelEase),0,-0.35);
-    n.forearmL.rotation.x = THREE.MathUtils.lerp(n.forearmL.rotation.x,1.0,kneelEase);
-    n.forearmR.rotation.x = THREE.MathUtils.lerp(n.forearmR.rotation.x,1.0,kneelEase);
   }
 
   // right arm holds the sword; left arm supports it
@@ -1324,7 +1306,6 @@ function sever(part, dirHint, cutT) {
 }
 
 function dropBotSword(r){if(!r.swordBody||r.swordDropped)return;r.swordDropped=true;r.hasWeapon=false;dropBody(r.swordBody,r.swordCol);r.swordBody=null;r.reach=1.55;if(!r.swordMesh)return;const pos=r.swordMesh.position.clone(),kind=r.weaponName;scene.remove(r.swordMesh);r.swordMesh=null;const p=makePickup(pos.x,pos.z,kind,{y:.22,weaponDrop:true,owner:r,life:90});p.mesh.rotation.set(0,r.yaw,.55);r.weaponPickupTarget=p;}
-function equipRobotWeapon(r,p){if(r.dead||r.surrender||r.hasWeapon||!p||!pickups.includes(p))return false;const c=WEAPONS[p.kind];if(!c)return false;r.weaponName=p.kind;r.swordCfg=c;r.hasWeapon=true;r.reach=c.len+.55;r.swordDropped=false;r.weaponPickupTarget=null;scene.remove(p.mesh);pickups.splice(pickups.indexOf(p),1);r.swordMesh=buildBladeMesh(c);scene.add(r.swordMesh);const sd=RAPIER.RigidBodyDesc.kinematicPositionBased();r.swordBody=world.createRigidBody(sd);r.swordCol=world.createCollider(RAPIER.ColliderDesc.cuboid(c.th,c.w,c.len/2).setDensity(c.density/900).setRestitution(.08).setFriction(.35).setCollisionGroups(0).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),r.swordBody);tag(r.swordCol,{k:'botsword',robot:r});r.swordPrevTip=new THREE.Vector3();r.swordTipSpeed=0;r.swordPhysicsReady=false;r.swordTargetPos=new THREE.Vector3();r.swordTargetQuat=new THREE.Quaternion();return true;}
 function killRobot(r, dirHint, forceMag) {
   if (r.dead) return;
   r.dead = true; S.kills++;
@@ -1512,7 +1493,6 @@ function driveSword(dt) {
 
 /* --------------------------------------------------------------- temporary KO */
 function startRobotKO(r, dir, duration=2.6){
-  if(r.dead||r.surrender||r.flee||r.ko)return;
   r.ko=true; r.koTimer=duration; r.state='ko'; r.stagger=0; r.knock.set(0,0,0);
   const names=Object.keys(r.parts).filter(n=>!r.parts[n].severed);
   for(const nm in r.parts){const p=r.parts[nm]; if(p.armorMesh){p.armorMesh=null;}}
@@ -1600,17 +1580,6 @@ function swordHit(part) {
   const massK = sword.cfg.density * sword.cfg.len / 1100;
   let dmg = speed * speed * 0.17 * massK * sword.cfg.dmg * S.mods.dmg * (0.18 + 0.82 * edgeAlign);
   const r = part.robot;
-  if (r.surrender) {
-    r.mercyHit=true;
-    r.begLine='I know... I know my time is up! ASG, please!';
-    r.begCd=0;
-    r.stagger=Math.max(r.stagger,.9);
-    r.staggerMag=Math.max(r.staggerMag,.85);
-    r.begHitTimer=0.65;
-    // Do NOT return: a surrendered robot can still physically be hit.
-    // It recoils, reacts, and the same weapon rules resolve the impact.
-  }
-  
   dmg *= (1 - r.armor) * (r.block > 0 ? 0.35 : 1);
   if (part.broken) dmg *= 1.6;      // a cracked bone gives way easily
   if (part.name === 'head' || part.name === 'neck') dmg *= 1.5;
@@ -1746,7 +1715,7 @@ function bladeClash(r) {
 
 function botSwordHitsPlayer(r) {
   if (r.dead || player.hurtCd > 0) return;
-  if (r.state !== 'strike' || !r.hasWeapon || r.surrender || r.flee) return;
+  if (r.state !== 'strike' || !r.hasWeapon || r.flee) return;
   if (r.swordTipSpeed < 3.0) return;
   const facing=playerFacingRobot(r);
   const ambush = playerIsAttacking() && facing < 0.15;
@@ -1765,7 +1734,6 @@ function botSwordHitsPlayer(r) {
 
 function armsDisabled(r){const bad=n=>!r.parts[n]||r.parts[n].severed;return (bad('handL')||bad('forearmL')||bad('upperArmL'))&&(bad('handR')||bad('forearmR')||bad('upperArmR'));}
 function canStartAttack(r,dist){
-  if(r.surrender||r.flee||r.ko||r.dead||r.stagger>0||r.atk>0) return false;
   if(!r.hasWeapon) return dist<1.7 && (playerIsVulnerable() || attackSlotFor(r,dist));
   return dist<r.reach*1.12 && attackSlotFor(r,dist);
 }
@@ -1776,11 +1744,9 @@ function stepAI(dt) {
     // dead robots are pure debris now — drop them so the list can't grow
     // without bound across waves (that leak used to tank the framerate).
     if (r.dead) { if (lockTarget !== r) robots.splice(ri, 1); continue; }
-    if (r.ko) { r.begCd=Math.max(0,r.begCd-dt); continue; }
+    if (r.ko) { continue; }
     if (r.neckReact) { r.neckTimer -= dt; r.stagger=Math.max(r.stagger,0.5); if(r.neckTimer<=0){ r.neckReact=false; killRobot(r,new THREE.Vector3(0,-0.05,1),1.35); } continue; }
     r.headBonk=Math.max(0,r.headBonk-dt);
-    if (r.begCd > 0) r.begCd -= dt;
-    if (r.begHitTimer > 0) r.begHitTimer -= dt;
     for (const nm in r.parts) { const p = r.parts[nm]; if (p.hitCd > 0) p.hitCd -= dt; }
     r.clashCd = Math.max(0, (r.clashCd || 0) - dt);
     r.t += dt;
@@ -1798,14 +1764,13 @@ function stepAI(dt) {
     r.yaw += clamp(diff, -3.2 * dt, 3.2 * dt);
 
     // --- state machine -----------------------------------------------
-    if (!r.surrender && r.swordDropped && !r.hasWeapon && !armsDisabled(r)) {
+    if (r.swordDropped && !r.hasWeapon && !armsDisabled(r)) {
       let bestP=null,bestD=99; for(const p of pickups){if(!p.weaponDrop||!WEAPONS[p.kind])continue;const d=Math.hypot(p.mesh.position.x-r.pos.x,p.mesh.position.z-r.pos.z);if(d<bestD&&(!p.owner||p.owner===r||p.owner.dead)){bestD=d;bestP=p;}}
       if(bestP)r.weaponPickupTarget=bestP;
     }
-    if(r.stagger>0&&!r.surrender&&!r.flee)r.state='stagger'; else if(r.state==='stagger'){r.state='approach';r.phase=0;}
+    if(r.stagger>0&&!r.flee)r.state='stagger'; else if(r.state==='stagger'){r.state='approach';r.phase=0;}
     let move=0,strafe=0;
     switch(r.state){
-      case 'surrender': r.phase=Math.min(2.0,r.phase+dt); break;
       case 'flee': move=1; break;
       case 'stagger': break;
       case 'approach':
@@ -1857,7 +1822,7 @@ function stepAI(dt) {
     // --- arm pose targets per state (sword stays in hand, always) -----
     const T = r.poseTarget;
     if (r.flee) { T.shR=-0.9; T.elR=-0.6; T.shL=-0.9; T.elL=-0.6; T.spine=-0.05; }
-    if (!r.surrender&&!r.flee&&r.state === 'windup') {
+    if (!r.flee&&r.state === 'windup') {
       const k = r.phase / ATK.windup;
       if(!r.hasWeapon){ T.shR = -1.05; T.elR = -0.75; T.shL = -0.85; T.elL = -0.7; T.spine = -0.08*k; }
       else {
@@ -1869,7 +1834,7 @@ function stepAI(dt) {
         T.attackSide = r.attackStyle === 'left' ? -1 : 1;
       }
       T.headY = 0;
-    } else if (!r.surrender&&!r.flee&&r.state === 'strike') {
+    } else if (!r.flee&&r.state === 'strike') {
       const k = r.phase / ATK.strike;
       const side = r.attackStyle === 'left' ? -1 : 1;
       if(!r.hasWeapon){ T.shR = 0.05 - k*0.25; T.elR = -0.05 - k*0.2; T.shL = -0.1 + k*0.25; T.elL = -0.2 + k*0.2; T.spine = -0.04 + k*0.08; }
@@ -1882,13 +1847,13 @@ function stepAI(dt) {
         T.elL = -1.0 + 0.45 * k;
         T.spine = 0.04 + side * 0.18 * k;
       }
-    } else if (!r.surrender&&!r.flee&&r.state === 'stagger') {
+    } else if (!r.flee&&r.state === 'stagger') {
       const m = r.staggerMag;
       T.shR = -0.7 - m * 0.5; T.elR = -0.7 - m * 0.3; T.spine = 0.25 + m * 0.55;
       T.shL = -0.4 - m * 0.5; T.elL = -0.5 - m * 0.3; T.headY = -0.2 - m * 0.5;
-    } else if (!r.surrender&&!r.flee&&r.block > 0) {
+    } else if (!r.flee&&r.block > 0) {
       T.shR = -1.9; T.elR = -1.9; T.spine = 0.1; T.shL = -1.6; T.elL = -1.5;
-    } else if (!r.surrender&&!r.flee) {
+    } else if (!r.flee) {
       // guard: blade up and forward, both hands near the hilt
       T.shR = -1.55; T.elR = -1.25; T.spine = 0.05;
       T.shL = -1.35; T.elL = -1.35; T.headY = 0;
@@ -1896,7 +1861,7 @@ function stepAI(dt) {
 
     // Coordinated attacks: most robots wait. One commits after the player's
     // swing has finished; a second can occasionally ambush from the side/back.
-    if(!r.surrender&&!r.flee&&(r.state==='approach'||r.state==='circle')&&canStartAttack(r,dist)){
+    if(!r.flee&&(r.state==='approach'||r.state==='circle')&&canStartAttack(r,dist)){
       const facing=playerFacingRobot(r);
       const ambush = playerIsAttacking() && facing < 0.15;
       const chance = ambush ? 0.22 : 0.62;
@@ -1908,7 +1873,6 @@ function stepAI(dt) {
 
     // --- locomotion: root only, damped, always finite -----------------
     if(r.flee){
-      // Mercy means they are allowed to ignore the arena walls and escape.
       // Once they are clearly outside the playable area, they disappear as
       // their final consequence rather than coming back into the wave.
       const away=new THREE.Vector3(r.pos.x,0,r.pos.z);
@@ -2176,7 +2140,7 @@ function updateLock(dt) {
   if (dCycleCooldown > 0) dCycleCooldown -= dt;
   if (keys.has('KeyD')) dHold += dt; else dHold = 0;
   if (dHold > 0.48 && dCycleCooldown <= 0 && lockTarget) {
-    const candidates=robots.filter(r=>!r.dead && !r.surrender && !r.ko && r!==lockTarget && Math.hypot(r.pos.x-pt.x,r.pos.z-pt.z)<LOCK_RANGE);
+    const candidates=robots.filter(r=>!r.dead && !r.ko && r!==lockTarget && Math.hypot(r.pos.x-pt.x,r.pos.z-pt.z)<LOCK_RANGE);
     if (candidates.length) {
       candidates.sort((a,b)=>Math.atan2(a.pos.x-pt.x,a.pos.z-pt.z)-Math.atan2(b.pos.x-pt.x,b.pos.z-pt.z));
       let next=candidates.find(r=>r.pos.x*0+r.pos.z*0===0); // deterministic first after current in angle order
@@ -2196,11 +2160,10 @@ function updateLock(dt) {
   }
   let best = null, bestD = LOCK_RANGE;
   for (const r of robots) {
-    if (r.dead || r.surrender || r.ko) continue;
+    if (r.dead || r.ko) continue;
     const d = Math.hypot(r.pos.x - pt.x, r.pos.z - pt.z);
     if (d < bestD) { bestD = d; best = r; }
   }
-  if (lockTarget && !lockTarget.dead && !lockTarget.surrender && !lockTarget.ko) {
     const curD = Math.hypot(lockTarget.pos.x - pt.x, lockTarget.pos.z - pt.z);
     if (curD < LOCK_RANGE && (!best || curD <= bestD + 1.5)) best = lockTarget;
   }
@@ -2223,15 +2186,6 @@ function physics(dt) {
   stepPickups(dt);
   flushBodies();               // safe point: nothing is iterating contacts yet
   world.step(events);
-  // Drain and discard collision events every step. Several colliders (player,
-  // robot limbs, enemy swords) have COLLISION_EVENTS active for potential
-  // future use, but nothing in this file ever reads the queue - it was
-  // growing unbounded on every physics tick. As soon as the player's capsule
-  // started overlapping robot limb colliders (i.e. the moment you got close
-  // enough to actually swing at something) the queue filled up fast enough
-  // to lock up the tab within a second or two. Draining it here keeps memory
-  // flat regardless of how many colliders are overlapping.
-  events.drainCollisionEvents(() => {});
   // Dynamic enemy weapons may have been deflected by your sword. Sync their
   // visible meshes from Rapier after the step so the impact is visible instead
   // of being overwritten by the authored pose.
