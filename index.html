@@ -33,6 +33,7 @@
   input[type=range] { width:240px; }
   #marks { position:fixed; inset:0; pointer-events:none; }
   #marks i { position:absolute; width:0; height:0; border-left:9px solid transparent; border-right:9px solid transparent; border-bottom:15px solid #ff7a2f; opacity:0.85; }
+  #toast { position:absolute; left:50%; top:14%; transform:translateX(-50%); color:var(--amber); letter-spacing:2px; font-size:17px; opacity:0; transition:opacity .25s; text-shadow:0 0 12px #000; }
   #err { position:fixed; inset:0; display:none; place-items:center; background:#0b0c0e; z-index:9; padding:30px; text-align:center; }
 </style>
 </head>
@@ -42,6 +43,7 @@
   <div class="bar"><i id="hpfill"></i></div>
   <div id="edge">EDGE 0&deg;</div>
   <div id="marks"></div>
+  <div id="toast"></div>
   <div id="stats">WAVE <b id="wave">1</b> &nbsp; KILLS <b id="kills">0</b> &nbsp; ARMOR <b id="armor">0%</b> &nbsp; BEST <b id="best">0</b></div>
 </div>
 
@@ -54,8 +56,10 @@
     <li><b>Lock-on</b> — automatic onto the nearest robot in range.</li>
     <li><b>A/D</b> — turn your body, or strafe around your locked target.</li>
     <li><b>Left mouse</b> (or <b>E</b>) — grip/pull back for a thrust; release to commit.</li>
-    <li><b>Wheel</b> (or <b>Z</b>/<b>X</b>) — rotate blade edge. Aligned edge + speed <b>slices bones in half</b>; flat/blunt hits <b>break</b> them so limbs hang useless.</li>
-    <li><b>Armor plates</b> and <b>repair cells</b> lie in the arena and drop from kills — walk over them to bolt on protection or patch up.</li>
+    <li><b>Wheel</b> (or <b>Z</b>/<b>X</b>) — rotate blade edge. It's about force and precision, not a health bar: swing hard and clean enough at a limb and it comes off in one blow, no matter how undamaged it was. Flat or blunt hits only <b>break</b> bones instead.</li>
+    <li>A clean, committed slice across the <b>neck</b> kills outright, even if the head doesn't come off. A fast edge through a softened torso <b>cuts a robot clean in two</b>. Bodies <b>ragdoll</b>: knock the wreckage around all you like.</li>
+    <li>Bolted <b>armor plates</b> are permanent — they can't be shattered or cut through. Wherever a plate sits, that spot is protected; hit somewhere unarmored instead.</li>
+    <li><b>Power-ups drop from every robot you scrap</b> — plates, repair cells, heavy arms, servos and new weapons — walk over them to bolt on protection or patch up.</li>
     <li><b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>Space</b> jump &middot; <b>Q/R</b> lean &middot; <b>C</b> crouch &middot; <b>F</b> kick &middot; <b>Esc</b> pause</li>
   </ul>
   <button id="startBtn">ENTER THE ARENA</button>
@@ -66,12 +70,6 @@
   <p>Mouse sensitivity / swing gain <span id="sensv"></span></p>
   <input type="range" id="sens" min="0.3" max="4" step="0.1" />
   <p style="margin-top:14px"><button id="resumeBtn">RESUME</button> <button class="ghost" id="quitBtn">ABANDON</button></p>
-</div></div>
-
-<div class="ov" id="upgrade"><div class="panel">
-  <h2 id="upTitle">WAVE CLEARED</h2>
-  <p>Salvage one system.</p>
-  <div class="cards" id="cards"></div>
 </div></div>
 
 <div class="ov" id="death"><div class="panel">
@@ -118,14 +116,11 @@ const S = {
 // membership << 16 | filter
 const G_WORLD = 0x0001, G_LIMB = 0x0002, G_SWORD = 0x0004, G_PLAYER = 0x0008;
 const grp = (mem, filt) => ((mem << 16) | filt) >>> 0;
-// Combat contacts are resolved by the safe manual hit pass below. Rapier
-// colliders only handle arena boundaries, so a hit can never mutate the
-// physics contact graph while a sword or limb is being removed.
-const GRP_LIMB      = grp(G_LIMB,   G_WORLD);
-const GRP_DEBRIS    = grp(G_LIMB,   G_WORLD);
-const GRP_SWORD_P   = grp(G_SWORD,  G_WORLD);
-const GRP_SWORD_BOT = grp(G_SWORD,  G_WORLD);
-const GRP_PLAYER    = grp(G_PLAYER, G_WORLD);
+const GRP_LIMB      = grp(G_LIMB,   G_SWORD);                       // limbs only take sword hits
+const GRP_DEBRIS    = grp(G_LIMB,   G_WORLD | G_LIMB | G_SWORD);
+const GRP_SWORD_P   = grp(G_SWORD,  G_WORLD | G_LIMB | G_SWORD);    // your blade: world, robots, other blades
+const GRP_SWORD_BOT = grp(G_SWORD,  G_PLAYER | G_SWORD);            // their blade: you and blades
+const GRP_PLAYER    = grp(G_PLAYER, G_WORLD | G_SWORD);
 
 /* --------------------------------------------------------------- three.js */
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
@@ -165,7 +160,66 @@ MAT.steel = new THREE.MeshStandardMaterial({ color:0xd7dde3, roughness:0.14, met
 MAT.steelDark = new THREE.MeshStandardMaterial({ color:0x7d848c, roughness:0.3, metalness:1 });
 MAT.brass = new THREE.MeshStandardMaterial({ color:0xb98a37, roughness:0.35, metalness:1 });
 MAT.leather = new THREE.MeshStandardMaterial({ color:0x3a2a1c, roughness:0.85, metalness:0.05 });
-MAT.armorPlate = new THREE.MeshStandardMaterial({ color:0x5f6b7a, roughness:0.35, metalness:0.9, emissive:0x0a2b44, emissiveIntensity:0.7 });
+MAT.armorPlate = new THREE.MeshStandardMaterial({ color:0x59667a, roughness:0.16, metalness:1, emissive:0x0a2b44, emissiveIntensity:0.5 });
+MAT.armorTrim  = new THREE.MeshStandardMaterial({ color:0xe8b23c, roughness:0.3,  metalness:1,    emissive:0x3a2500, emissiveIntensity:0.4 });
+MAT.armorRivet = new THREE.MeshStandardMaterial({ color:0x2b2f36, roughness:0.4,  metalness:1 });
+MAT.armorEdge = new THREE.MeshStandardMaterial({
+  color: 0xdbe7f2,
+  roughness: 0.08,
+  metalness: 1.0,
+  emissive: 0x071018,
+  emissiveIntensity: 0.18,
+  envMapIntensity: 2.4
+});
+MAT.armorPlate = new THREE.MeshPhysicalMaterial({
+  color: 0xcbd5df,
+  metalness: 1.0,
+  roughness: 0.10,
+  clearcoat: 0.85,
+  clearcoatRoughness: 0.06,
+  reflectivity: 1.0,
+  envMapIntensity: 2.8
+});
+
+/* ============================ ARMOR FIT FIX ============================
+   Armor is built as shells around the existing 15-bone rig instead of
+   floating as flat plates.  The shell depth follows the body part, leaving
+   a small clearance so it visually wraps the silhouette.
+*/
+function makeArmorShell(geometry, material = MAT.armorPlate) {
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function armorCapsule(radius, length, material = MAT.armorPlate) {
+  // Capsule aligned along Y: ideal for upper/lower arms and legs.
+  const g = new THREE.CapsuleGeometry(radius, length, 8, 16);
+  return makeArmorShell(g, material);
+}
+
+function armorTorso(width, height, depth, material = MAT.armorPlate) {
+  // Rounded box gives the chest an actual wraparound silhouette.
+  const g = new THREE.BoxGeometry(width, height, depth, 4, 6, 4);
+  g.computeVertexNormals();
+  return makeArmorShell(g, material);
+}
+
+function armorHelmet(radius, height, material = MAT.armorPlate) {
+  // Full hemispherical/side shell rather than a flat top plate.
+  const g = new THREE.SphereGeometry(radius, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.78);
+  const mesh = makeArmorShell(g, material);
+  mesh.scale.y = height / (radius * 2);
+  return mesh;
+}
+
+function attachArmorShell(parent, mesh, scale = 1) {
+  mesh.scale.multiplyScalar(scale);
+  parent.add(mesh);
+  return mesh;
+}
+
 
 const ARENA = 22;
 const floor = new THREE.Mesh(new THREE.BoxGeometry(ARENA * 2, 1, ARENA * 2), MAT.floor);
@@ -184,6 +238,7 @@ for (const p of [[-12,5,-12],[12,5,-12],[12,5,12],[-12,5,12]]) {
 
 /* --------------------------------------------------------------- physics */
 const world = new RAPIER.World({ x:0, y:-22, z:0 });
+const events = new RAPIER.EventQueue(true);
 const reg = new Map();               // collider handle -> tag
 function tag(collider, t) { reg.set(collider.handle, t); return collider; }
 
@@ -193,19 +248,13 @@ function tag(collider, t) { reg.set(collider.handle, t); return collider; }
 // crashes the wasm module. Everything that dies gets queued and is flushed at
 // a single safe point each frame.
 const deadBodies = [];
-const deadBodySet = new Set();
 function dropBody(body, collider) {
   if (!body) return;
   if (collider) reg.delete(collider.handle);
-  if (deadBodySet.has(body)) return;
-  deadBodySet.add(body);
-  deadBodies.push(body);
+  if (!deadBodies.includes(body)) deadBodies.push(body);
 }
 function flushBodies() {
-  for (const b of deadBodies) {
-    try { world.removeRigidBody(b); } catch (e) { /* already gone */ }
-    deadBodySet.delete(b);
-  }
+  for (const b of deadBodies) { try { world.removeRigidBody(b); } catch (e) { /* already gone */ } }
   deadBodies.length = 0;
 }
 
@@ -222,13 +271,14 @@ function flushBodies() {
 })();
 
 /* --------------------------------------------------------------- skeleton */
-// 15 bones: pelvis, torso, head, upper arm x2, forearm x2, hand x2,
+// 16 bones: pelvis, torso, neck, head, upper arm x2, forearm x2, hand x2,
 // thigh x2, shin (leg) x2, foot x2. Built as a real THREE hierarchy so the
 // pose is always coherent — nothing can "flare out" or fly away, because the
 // physics colliders FOLLOW the rig instead of trying to hold it together.
 const BONE = {
   pelvis:   { size:[0.30,0.22,0.22], off:[0,0,0],        hp:70,  sev:false },
   torso:    { size:[0.38,0.46,0.26], off:[0,0.23,0],     hp:80,  sev:false },
+  neck:     { size:[0.13,0.11,0.13], off:[0,0.03,0],     hp:16,  sev:true  },
   head:     { size:[0.22,0.22,0.22], off:[0,0.13,0],     hp:24,  sev:true  },
   upperArmL:{ size:[0.12,0.30,0.12], off:[0,-0.15,0],    hp:24,  sev:true  },
   forearmL: { size:[0.10,0.28,0.10], off:[0,-0.14,0],    hp:20,  sev:true  },
@@ -243,6 +293,17 @@ const BONE = {
   shinR:    { size:[0.13,0.42,0.13], off:[0,-0.21,0],    hp:28,  sev:true  },
   footR:    { size:[0.12,0.09,0.26], off:[0,-0.045,0.05],hp:16,  sev:true  },
 };
+// How hard a swing has to land, fully committed and edge-aligned, to take a
+// limb off in one blow — independent of how much prior damage it's soaked.
+// Thin bones (hands, head) go with a moderate cut; thick ones (thighs) need
+// a genuinely brutal swing.
+const _sevSpeedCache = {};
+function severSpeedFor(name) {
+  if (_sevSpeedCache[name] != null) return _sevSpeedCache[name];
+  const v = 9.5 + (BONE[name] ? BONE[name].hp : 24) * 0.16;
+  _sevSpeedCache[name] = v;
+  return v;
+}
 const L_UPPER = 0.30, L_FORE = 0.28, L_THIGH = 0.42, L_SHIN = 0.42;
 
 function makeRig(mat, hotMat) {
@@ -261,7 +322,8 @@ function makeRig(mat, hotMat) {
 
   const pelvis = node('pelvis', root, 0, 0.95, 0);  skin('pelvis', pelvis);
   const torso  = node('torso', pelvis, 0, 0.11, 0); skin('torso', torso);
-  const head   = node('head', torso, 0, 0.46, 0);   skin('head', head, hotMat);
+  const neck   = node('neck', torso, 0, 0.34, 0);   skin('neck', neck, hotMat);
+  const head   = node('head', neck, 0, 0.12, 0);    skin('head', head, hotMat);
 
   for (const side of ['L','R']) {
     const s = side === 'L' ? -1 : 1;
@@ -329,7 +391,8 @@ function makePlayer() {
     .lockRotations().setLinearDamping(0.6).setCcdEnabled(true);
   player.body = world.createRigidBody(d);
   player.col = tag(world.createCollider(RAPIER.ColliderDesc.capsule(0.55, 0.35)
-    .setFriction(0.4).setDensity(120).setCollisionGroups(GRP_PLAYER), player.body), { k:'player' });
+    .setFriction(0.4).setDensity(120).setCollisionGroups(GRP_PLAYER)
+    .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), player.body), { k:'player' });
 }
 makePlayer();
 
@@ -341,6 +404,27 @@ function updateAnchor() {
 
 const heroRig = makeRig(MAT.hero, MAT.heroHot);
 scene.add(heroRig.root);
+
+/* ---- the player's armour is physically visible on their own limbs ---- */
+const HERO_PLATES = [
+  { name:'forearmR', size:[0.16,0.22,0.05], off:[0,-0.13,-0.07] },
+  { name:'forearmL', size:[0.16,0.22,0.05], off:[0,-0.13,-0.07] },
+  { name:'upperArmR',size:[0.18,0.18,0.06], off:[0,-0.05,-0.08] },
+  { name:'upperArmL',size:[0.18,0.18,0.06], off:[0,-0.05,-0.08] },
+  { name:'torso',    size:[0.44,0.34,0.06], off:[0, 0.24, 0.16] },
+  { name:'thighR',   size:[0.19,0.24,0.06], off:[0,-0.14, 0.10] },
+  { name:'thighL',   size:[0.19,0.24,0.06], off:[0,-0.14, 0.10] },
+].map(slot => {
+  const m = buildArmorPlate(slot.size);
+  m.position.set(slot.off[0], slot.off[1], 0);
+  m.visible = false;
+  heroRig.nodes[slot.name].add(m);
+  return m;
+});
+function updateHeroArmor() {
+  const worn = S.armorPlates || 0;
+  HERO_PLATES.forEach((m, i) => { m.visible = i < worn; });
+}
 
 /* ----------------------------------------------------------------- sword */
 // A properly shaped weapon: tapered, diamond-section blade with a fuller,
@@ -443,7 +527,8 @@ const HAND_FROM_SWORD = new THREE.Quaternion().setFromAxisAngle(AXIS_X, Math.PI 
 const SWORD_FROM_HAND = new THREE.Quaternion().setFromAxisAngle(AXIS_X, -Math.PI / 2);
 
 const sword = { body:null, collider:null, mesh:null, cfg:WEAPONS.longsword, edge:0, thrust:0,
-  lastTip:new THREE.Vector3(), tipVel:new THREE.Vector3(), gripWorld:new THREE.Vector3(), quat:new THREE.Quaternion() };
+  lastTip:new THREE.Vector3(), tipVel:new THREE.Vector3(), gripWorld:new THREE.Vector3(), quat:new THREE.Quaternion(),
+  base:new THREE.Vector3(), tip:new THREE.Vector3(), prevBase:new THREE.Vector3(), prevTip:new THREE.Vector3(), sweepReady:false };
 function buildSword(name) {
   if (sword.body) { dropBody(sword.body, sword.collider); flushBodies(); scene.remove(sword.mesh); }
   const c = WEAPONS[name]; sword.cfg = c; S.weapon = name;
@@ -452,9 +537,11 @@ function buildSword(name) {
   sword.body = world.createRigidBody(d);
   const cd = RAPIER.ColliderDesc.cuboid(c.th, c.w, c.len / 2)
     .setDensity(c.density / 900).setRestitution(0.15).setFriction(0.2)
-    .setCollisionGroups(GRP_SWORD_P);
+    .setCollisionGroups(GRP_SWORD_P)
+    .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
   sword.collider = tag(world.createCollider(cd, sword.body), { k:'sword' });
   sword.mesh = buildBladeMesh(c); scene.add(sword.mesh);
+  sword.sweepReady = false;
 }
 buildSword('longsword');
 
@@ -505,12 +592,38 @@ function clank(power, cut) {
 /* ---------------------------------------------------------------- robots */
 const robots = [];
 const debris = [];   // free-flying severed bones
+const corpses = [];  // connected, slightly stiff death poses
 const pickups = [];  // armor plates / repair cells lying in the arena
 
 /* --------------------------------------------------------------- pickups */
+// Every power-up in the game now comes off a dead robot (or is scattered at the
+// start of a wave). There is no level-up screen any more.
+const POWERUPS = {
+  armor:      { col:0x4fb6ff, label:'PLATING' },
+  repair:     { col:0x18ff8a, label:'REPAIR CELL' },
+  dmg:        { col:0xff5a2f, label:'HEAVY ARMS' },
+  servo:      { col:0xffd24a, label:'SERVO BOOST' },
+  greatsword: { col:0xd0d8e4, label:'GREATSWORD' },
+  mace:       { col:0xb08d57, label:'MACE' },
+  spear:      { col:0x9ad1ff, label:'SPEAR' },
+  longsword:  { col:0xe8e2d6, label:'LONGSWORD' },
+};
 function makePickup(x, z, kind) {
   const g = new THREE.Group();
-  if (kind === 'repair') {
+  if (WEAPONS[kind]) {
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.5), MAT.steelDark);
+    g.add(crate);
+    const blade = buildBladeMesh(WEAPONS[kind]);
+    blade.scale.setScalar(0.55);
+    blade.rotation.set(Math.PI / 2, 0, 0.35);
+    blade.position.y = 0.2;
+    g.add(blade);
+  } else if (kind === 'dmg' || kind === 'servo') {
+    const core = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3),
+      new THREE.MeshStandardMaterial({ color:0x2a2a2e, roughness:0.4, metalness:0.8,
+        emissive:POWERUPS[kind].col, emissiveIntensity:1.0 }));
+    g.add(core);
+  } else if (kind === 'repair') {
     const core = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.30, 0.20),
       new THREE.MeshStandardMaterial({ color:0x2e7d4f, roughness:0.4, metalness:0.7,
         emissive:0x18ff8a, emissiveIntensity:0.9 }));
@@ -527,22 +640,36 @@ function makePickup(x, z, kind) {
   }
   g.position.set(x, 0.85, z);
   scene.add(g);
-  const light = new THREE.PointLight(kind === 'repair' ? 0x18ff8a : 0x4fb6ff, 12, 5);
+  const light = new THREE.PointLight((POWERUPS[kind] || POWERUPS.armor).col, 12, 5);
   g.add(light);
-  const p = { mesh:g, kind, t:Math.random() * 6 };
+  const p = { mesh:g, kind, t:Math.random() * 6, life:38 };
   pickups.push(p);
   return p;
 }
+// Robots ALWAYS drop something now — that's the whole progression system.
+const LOOT_TABLE = ['armor','armor','armor','repair','repair','dmg','servo',
+                    'greatsword','mace','spear','longsword'];
 function dropArmorPickup(x, z) {
-  const roll = Math.random();
-  if (roll < 0.28) makePickup(x, z, 'armor');
-  else if (roll < 0.40) makePickup(x, z, 'repair');
+  const kind = LOOT_TABLE[Math.floor(Math.random() * LOOT_TABLE.length)];
+  makePickup(x + (Math.random()-0.5) * 0.8, z + (Math.random()-0.5) * 0.8, kind);
+  if (Math.random() < 0.3) makePickup(x + (Math.random()-0.5)*1.6, z + (Math.random()-0.5)*1.6, 'repair');
+}
+function toast(text) {
+  const el = $('toast');
+  if (!el) return;
+  el.textContent = text;
+  el.style.opacity = '1';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.style.opacity = '0'; }, 1300);
 }
 function stepPickups(dt) {
   const pt = player.body.translation();
   for (let i = pickups.length - 1; i >= 0; i--) {
     const p = pickups[i];
     p.t += dt;
+    p.life -= dt;
+    if (p.life <= 0) { scene.remove(p.mesh); pickups.splice(i, 1); continue; }
+    if (p.life < 5) p.mesh.visible = (p.life * 6 % 1) > 0.4;
     p.mesh.rotation.y += dt * 1.6;
     p.mesh.position.y = 0.85 + Math.sin(p.t * 2.2) * 0.08;
     const d = Math.hypot(p.mesh.position.x - pt.x, p.mesh.position.z - pt.z);
@@ -550,9 +677,17 @@ function stepPickups(dt) {
       if (p.kind === 'armor') {
         S.mods.armor = Math.min(0.75, S.mods.armor + 0.12);
         S.armorPlates = (S.armorPlates || 0) + 1;
-      } else {
+        updateHeroArmor();
+      } else if (p.kind === 'repair') {
         player.hp = Math.min(S.mods.maxHp, player.hp + 30);
+      } else if (p.kind === 'dmg') {
+        S.mods.dmg *= 1.14;
+      } else if (p.kind === 'servo') {
+        S.mods.swingSpeed *= 1.10;
+      } else if (WEAPONS[p.kind]) {
+        buildSword(p.kind);
       }
+      toast((POWERUPS[p.kind] || { label:'SALVAGE' }).label + ' ACQUIRED');
       scene.remove(p.mesh);
       pickups.splice(i, 1);
       clank(3, true);
@@ -570,12 +705,13 @@ function spawnRobot(x, z, wave) {
   const rig = makeRig(MAT.bot, MAT.botHot);
   scene.add(rig.root);
   const r = {
-    rig, parts:{}, dead:false, hp:100 * tier, maxHp:100 * tier,
+    rig, parts:{}, dead:false, hp:260 * tier, maxHp:260 * tier,
     pos:new THREE.Vector3(x, 0, z), vel:new THREE.Vector3(), yaw:0,
     state:'approach', t:Math.random() * 2, atk:0, phase:0, stagger:0, block:0,
     crippled:false, walk:Math.random() * 6, bob:0,
     speed:2.0 + Math.min(2.6, wave * 0.14), aggr:Math.min(1, 0.35 + wave * 0.07),
-    armor:Math.min(0.6, (wave - 1) * 0.05), reach:2.1, hitFlag:0,
+    armor:Math.min(0.62, 0.18 + (wave - 1) * 0.05), reach:2.1, hitFlag:0,
+    knock:new THREE.Vector3(), staggerMag:0,
     pose:{}, poseTarget:{},
   };
   // one kinematic collider per bone, driven by the rig
@@ -585,8 +721,10 @@ function spawnRobot(x, z, wave) {
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased());
     const col = world.createCollider(RAPIER.ColliderDesc
       .cuboid(b.size[0]/2, b.size[1]/2, b.size[2]/2)
-      .setCollisionGroups(GRP_LIMB), body);
-    const part = { name, node, body, col, robot:r, hp:b.hp * tier, maxHp:b.hp * tier, severed:false, hitCd:0 };
+      .setCollisionGroups(GRP_LIMB)
+      .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
+    const hp = b.hp * tier * 2.6;
+    const part = { name, node, body, col, robot:r, hp, maxHp:hp, severed:false, hitCd:0 };
     tag(col, { k:'part', part });
     r.parts[name] = part;
   }
@@ -599,14 +737,99 @@ function spawnRobot(x, z, wave) {
   r.swordMesh = buildBladeMesh(c); scene.add(r.swordMesh);
   r.swordBody = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased());
   r.swordCol = world.createCollider(RAPIER.ColliderDesc.cuboid(c.th, c.w, c.len / 2)
-    .setCollisionGroups(GRP_SWORD_BOT), r.swordBody);
+    .setCollisionGroups(GRP_SWORD_BOT)
+    .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), r.swordBody);
   tag(r.swordCol, { k:'botsword', robot:r });
   r.swordPrevTip = new THREE.Vector3();
   r.swordTipSpeed = 0;
 
+  boltOnArmor(r, wave);
   poseRobot(r, 0);
   robots.push(r);
   return r;
+}
+
+/* ------------------------------------------------- visible bolted-on armour */
+// A plate genuinely wraps around the bone instead of sitting flat on one
+// face: a curved shell that hugs most of the limb's circumference, capped
+// top and bottom with raised rim bands, a polished centre ridge, and rivets
+// along the seam. It is welded on permanently — once bolted it stays, and
+// it shields whatever bone it sits on.
+function buildArmorPlate(size) {
+  const [sx, sy, sz] = size;
+  const g = new THREE.Group();
+  const radius = Math.max(sx, sz) / 2 * 1.1;
+  const wrapAngle = Math.PI * 1.3;                    // wraps most of the way around
+  const thetaStart = Math.PI / 2 - wrapAngle / 2;      // opening faces the back
+
+  const shell = new THREE.Mesh(
+    new THREE.CylinderGeometry(radius, radius, sy * 0.94, 14, 1, true, thetaStart, wrapAngle),
+    MAT.armorPlate);
+  g.add(shell);
+
+  const band = (h, y) => {
+    const m = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 1.07, radius * 1.07, h, 14, 1, true, thetaStart, wrapAngle),
+      MAT.armorTrim);
+    m.position.y = y;
+    g.add(m);
+    return m;
+  };
+  band(sy * 0.09, sy * 0.43);
+  band(sy * 0.09, -sy * 0.43);
+
+  // a bright polished ridge running down the centre — catches the light and
+  // reads as sharpened, load-bearing plating
+  const ridge = new THREE.Mesh(new THREE.BoxGeometry(sx * 0.14, sy * 0.88, sz * 0.1), MAT.armorPlate);
+  ridge.position.set(0, 0, radius * 0.99);
+  g.add(ridge);
+
+  // rivets running along both edges of the wrap seam
+  const rivGeo = new THREE.SphereGeometry(Math.max(0.01, sy * 0.05), 6, 6);
+  for (const ang of [thetaStart, thetaStart + wrapAngle]) {
+    for (const fy of [-0.32, 0, 0.32]) {
+      const riv = new THREE.Mesh(rivGeo, MAT.armorRivet);
+      riv.position.set(Math.cos(ang) * radius, sy * fy, Math.sin(ang) * radius);
+      g.add(riv);
+    }
+  }
+
+  g.children.forEach(m => { m.castShadow = true; });
+  g.userData.half = [radius, sy / 2, radius];
+  return g;
+}
+
+const ARMOR_SLOTS = [
+  { name:'torso',     size:[0.44,0.34,0.06], off:[0, 0.24, 0.16],  hp:70, tier:0 },
+  { name:'head',      size:[0.24,0.12,0.06], off:[0, 0.15, 0.12],  hp:34, tier:0 },
+  { name:'upperArmL', size:[0.17,0.17,0.06], off:[0,-0.05,-0.08],  hp:30, tier:1 },
+  { name:'upperArmR', size:[0.17,0.17,0.06], off:[0,-0.05,-0.08],  hp:30, tier:1 },
+  { name:'thighL',    size:[0.19,0.24,0.06], off:[0,-0.14, 0.10],  hp:38, tier:2 },
+  { name:'thighR',    size:[0.19,0.24,0.06], off:[0,-0.14, 0.10],  hp:38, tier:2 },
+  { name:'forearmL',  size:[0.15,0.20,0.05], off:[0,-0.13,-0.07],  hp:26, tier:3 },
+  { name:'forearmR',  size:[0.15,0.20,0.05], off:[0,-0.13,-0.07],  hp:26, tier:3 },
+  { name:'shinL',     size:[0.17,0.26,0.05], off:[0,-0.18, 0.09],  hp:30, tier:3 },
+  { name:'shinR',     size:[0.17,0.26,0.05], off:[0,-0.18, 0.09],  hp:30, tier:3 },
+];
+function boltOnArmor(r, wave) {
+  const level = Math.min(3, Math.floor((wave - 1) / 2));
+  for (const slot of ARMOR_SLOTS) {
+    if (slot.tier > level) continue;
+    const part = r.parts[slot.name];
+    if (!part) continue;
+    const plate = buildArmorPlate(slot.size);
+    plate.position.set(slot.off[0], slot.off[1], 0);
+    part.node.add(plate);
+    part.armorMesh = plate;
+    part.armorHalf = plate.userData.half;
+    // permanent plating: nothing here depletes or shatters — a solid hit
+    // just sparks and rings off it, and the frame underneath is shielded.
+  }
+}
+function armorSpark(part, dir, speed) {
+  const t0 = part.body.translation();
+  burst(new THREE.Vector3(t0.x, t0.y, t0.z), 14, 6, false);
+  clank(6, true);
 }
 
 /* ---- robot posing: authored FK, so arms can never flail or fly away ---- */
@@ -627,7 +850,8 @@ function poseRobot(r, dt) {
   n.pelvis.position.y = r.bob;
   n.pelvis.rotation.set(0.03 + (r.crippled ? 0.5 : 0), 0, gait2 * 0.05);
   n.torso.rotation.set(P.spine * 0.5 + 0.06, P.spine * 0.4, gait2 * 0.06);
-  n.head.rotation.set(-P.spine * 0.3, P.headY, 0);
+  n.neck.rotation.set(-P.spine * 0.15, P.headY * 0.3, 0);
+  n.head.rotation.set(-P.spine * 0.15, P.headY * 0.7, 0);
 
   // legs: simple two-bone stride
   n.thighL.rotation.set(gait * 0.7 - 0.05, 0, 0.05);
@@ -653,19 +877,24 @@ function poseRobot(r, dt) {
 
   r.rig.root.updateMatrixWorld(true);
 
-  // sword welded into the right hand
-  const hand = n.handR;
-  hand.matrixWorld.decompose(_wp, _wq, _ws);
-  const sq = _wq.clone().multiply(SWORD_FROM_HAND);
-  const gl = gripLocal(r.swordCfg).applyQuaternion(sq);
-  const sp = _wp.clone().sub(gl);
-  r.swordMesh.position.copy(sp); r.swordMesh.quaternion.copy(sq);
-  const tip = sp.clone().add(new THREE.Vector3(0, 0, -r.swordCfg.len / 2).applyQuaternion(sq));
-  r.swordTipSpeed = dt > 0 ? tip.distanceTo(r.swordPrevTip) / dt : 0;
-  r.swordPrevTip.copy(tip);
-  if (!r.dead) {
-    r.swordBody.setNextKinematicTranslation({ x:sp.x, y:sp.y, z:sp.z });
-    r.swordBody.setNextKinematicRotation({ x:sq.x, y:sq.y, z:sq.z, w:sq.w });
+  // sword welded into the right hand. A fractured arm may already have
+  // dropped it, so never touch a removed mesh/body again.
+  if (r.swordMesh && r.swordBody) {
+    const hand = n.handR;
+    hand.matrixWorld.decompose(_wp, _wq, _ws);
+    const sq = _wq.clone().multiply(SWORD_FROM_HAND);
+    const gl = gripLocal(r.swordCfg).applyQuaternion(sq);
+    const sp = _wp.clone().sub(gl);
+    r.swordMesh.position.copy(sp); r.swordMesh.quaternion.copy(sq);
+    const tip = sp.clone().add(new THREE.Vector3(0, 0, -r.swordCfg.len / 2).applyQuaternion(sq));
+    r.swordTipSpeed = dt > 0 ? tip.distanceTo(r.swordPrevTip) / dt : 0;
+    r.swordPrevTip.copy(tip);
+    if (!r.dead) {
+      r.swordBody.setNextKinematicTranslation({ x:sp.x, y:sp.y, z:sp.z });
+      r.swordBody.setNextKinematicRotation({ x:sq.x, y:sq.y, z:sq.z, w:sq.w });
+    }
+  } else {
+    r.swordTipSpeed = 0;
   }
   // colliders follow the bone meshes exactly
   for (const name in r.parts) {
@@ -698,6 +927,119 @@ function makeDebris(mesh, worldPos, worldQuat, half, impulse) {
   return d;
 }
 
+/* ---------------------------------------------------------------- ragdolls */
+// A dead robot is converted into a real jointed ragdoll: one dynamic body per
+// bone, spherical joints where the joints were. It topples, slides, and you can
+// keep whacking the wreck around the arena.
+const ragdolls = [];
+const RAG_PARENT = {
+  torso:'pelvis', neck:'torso', head:'neck',
+  upperArmL:'torso', forearmL:'upperArmL', handL:'forearmL',
+  upperArmR:'torso', forearmR:'upperArmR', handR:'forearmR',
+  thighL:'pelvis', shinL:'thighL', footL:'shinL',
+  thighR:'pelvis', shinR:'thighR', footR:'shinR',
+};
+const GRP_RAG = grp(G_LIMB, G_WORLD | G_LIMB | G_SWORD | G_PLAYER);
+
+function makeRagdoll(r, names, opts) {
+  opts = opts || {};
+  const bodies = {}, entries = [];
+  r.rig.root.updateMatrixWorld(true);
+  for (const name of names) {
+    const part = r.parts[name];
+    if (!part || part.severed) continue;
+    const over = opts.override && opts.override[name];
+    const mesh = over ? over.mesh : part.node.userData.mesh;
+    const half = over ? over.half : [BONE[name].size[0]/2, BONE[name].size[1]/2, BONE[name].size[2]/2];
+    if (!over) {
+      mesh.updateMatrixWorld(true);
+      mesh.matrixWorld.decompose(_wp, _wq, _ws);
+      scene.attach(mesh);
+    } else {
+      _wp.copy(mesh.position); _wq.copy(mesh.quaternion);
+      if (!mesh.parent) scene.add(mesh);
+    }
+    mesh.visible = true;
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
+      .setTranslation(_wp.x, _wp.y, _wp.z)
+      .setRotation({ x:_wq.x, y:_wq.y, z:_wq.z, w:_wq.w })
+      .setLinearDamping(0.12).setAngularDamping(0.55).setCcdEnabled(true));
+    const col = world.createCollider(RAPIER.ColliderDesc.cuboid(half[0], half[1], half[2])
+      .setDensity(24).setFriction(0.95).setRestitution(0.05)
+      .setCollisionGroups(GRP_RAG), body);
+    const entry = { mesh, body, col, name };
+    tag(col, { k:'rag', entry });
+    bodies[name] = entry;
+    entries.push(entry);
+    // retire the old kinematic hit collider, the bone is loose now
+    part.severed = true;
+    dropBody(part.body, part.col);
+  }
+  // stitch the joints back together where both bones made it into this half
+  for (const name in bodies) {
+    const pName = opts.parentOf && opts.parentOf[name] !== undefined ? opts.parentOf[name] : RAG_PARENT[name];
+    const parent = pName && bodies[pName];
+    if (!parent) continue;
+    const jointWorld = r.parts[name].node.getWorldPosition(new THREE.Vector3());
+    const anchorFor = (entry) => {
+      const t = entry.body.translation(), q = entry.body.rotation();
+      return jointWorld.clone().sub(new THREE.Vector3(t.x, t.y, t.z))
+        .applyQuaternion(new THREE.Quaternion(q.x, q.y, q.z, q.w).invert());
+    };
+    const a1 = anchorFor(parent), a2 = anchorFor(bodies[name]);
+    try {
+      const jd = RAPIER.JointData.spherical({ x:a1.x, y:a1.y, z:a1.z }, { x:a2.x, y:a2.y, z:a2.z });
+      world.createImpulseJoint(jd, parent.body, bodies[name].body, true);
+    } catch (e) { /* joint refused: the bone just falls free, still fine */ }
+  }
+  if (opts.impulse) {
+    for (const e of entries) {
+      const m = e.body.mass();
+      e.body.applyImpulse({ x:opts.impulse.x * m, y:opts.impulse.y * m, z:opts.impulse.z * m }, true);
+      e.body.applyTorqueImpulse({
+        x:(Math.random()-0.5) * m * 0.6,
+        y:(Math.random()-0.5) * m * 0.6,
+        z:(Math.random()-0.5) * m * 0.6 }, true);
+    }
+  }
+  const rag = { entries, t:0 };
+  ragdolls.push(rag);
+  while (ragdolls.length > 16) {
+    const old = ragdolls.shift();
+    for (const e of old.entries) { scene.remove(e.mesh); dropBody(e.body, e.col); }
+  }
+  return rag;
+}
+function stepRagdolls(dt) {
+  for (const rag of ragdolls) {
+    rag.t += dt;
+    for (const e of rag.entries) {
+      const t = e.body.translation(), q = e.body.rotation();
+      e.mesh.position.set(t.x, t.y, t.z);
+      e.mesh.quaternion.set(q.x, q.y, q.z, q.w);
+    }
+  }
+}
+function clearRagdolls() {
+  for (const rag of ragdolls) for (const e of rag.entries) { scene.remove(e.mesh); dropBody(e.body, e.col); }
+  ragdolls.length = 0;
+}
+// whacking a corpse sends it flying
+function ragHit(entry) {
+  const speed = sword.tipVel.length();
+  if (speed < 2.2) return;
+  if (entry.hitCd && entry.hitCd > performance.now()) return;
+  entry.hitCd = performance.now() + 120;
+  const n = sword.tipVel.clone().normalize();
+  const m = entry.body.mass();
+  entry.body.applyImpulse({ x:n.x * m * speed * 0.7, y:m * speed * 0.22, z:n.z * m * speed * 0.7 }, true);
+  entry.body.applyTorqueImpulse({ x:(Math.random()-0.5)*m*1.2, y:(Math.random()-0.5)*m*1.2, z:(Math.random()-0.5)*m*1.2 }, true);
+  const t = entry.body.translation();
+  burst(new THREE.Vector3(t.x, t.y, t.z), 10, Math.min(7, speed * 0.4), false);
+  clank(Math.min(6, speed * 0.4), false);
+  shake = Math.min(0.4, shake + 0.05);
+}
+
 /* --------------------------------------------------- slicing & fractures */
 // Cut a bone into two chunks at a height `cutT` (0..1 down its length),
 // instead of just popping the whole bone off at the joint.
@@ -715,11 +1057,11 @@ function sliceChunks(part, cutT, dir) {
     m.castShadow = true;
     scene.add(m);
     const pos = _wp.clone().addScaledVector(yAxis, offset);
-    const spin = 5 + Math.random() * 5;
+    const spin = 0.8 + Math.random() * 0.8;
     const d = makeDebris(m, pos, _wq.clone(), [sx / 2, h / 2, sz / 2], {
-      x: dir.x * spin, y: Math.abs(dir.y) * 4 + 2.5, z: dir.z * spin,
+      x: dir.x * spin, y: 0.45 + Math.abs(dir.y) * 0.5, z: dir.z * spin,
     });
-    d.body.applyTorqueImpulse({ x:(Math.random()-0.5)*3, y:(Math.random()-0.5)*3, z:(Math.random()-0.5)*3 }, true);
+    d.body.applyTorqueImpulse({ x:(Math.random()-0.5)*0.45, y:(Math.random()-0.5)*0.45, z:(Math.random()-0.5)*0.45 }, true);
   }
   mesh.visible = false;
 }
@@ -730,8 +1072,8 @@ function breakBone(part, dir) {
   if (part.broken || part.severed) return;
   part.broken = true;
   const r = part.robot;
-  part.bendX = (Math.random() - 0.5) * 1.3;
-  part.bendZ = (Math.random() - 0.5) * 1.3;
+  part.bendX = (Math.random() - 0.5) * 0.8;
+  part.bendZ = (Math.random() - 0.5) * 0.8;
   part.node.userData.mesh.material = MAT.botHot;
   if (/thigh|shin|foot/.test(part.name)) r.crippled = true;
   if (/handR|forearmR|upperArmR/.test(part.name) && Math.random() < 0.7) dropBotSword(r);
@@ -740,37 +1082,122 @@ function breakBone(part, dir) {
   clank(5, false);
 }
 
+// THE money shot: a fast, well-aligned edge through the trunk does not pop a
+// joint — it cuts the whole robot into an upper and a lower half, each of which
+// falls as its own ragdoll.
+const UPPER_HALF = ['torso','neck','head','upperArmL','forearmL','handL','upperArmR','forearmR','handR'];
+const LOWER_HALF = ['pelvis','thighL','shinL','footL','thighR','shinR','footR'];
+function bisectRobot(r, part, cutT, dirHint) {
+  if (r.dead) return;
+  r.dead = true; S.kills++;
+  r.bisected = true;
+  dropBotSword(r);
+  for (const nm in r.parts) { const p = r.parts[nm]; if (p.armorMesh) p.armorMesh = null; }
+
+  const dir = (dirHint || new THREE.Vector3(1, 0.3, 0)).clone().normalize();
+  const trunk = part.name === 'pelvis' ? r.parts.pelvis : r.parts.torso;
+  const bone = BONE[trunk.name];
+  const mesh = trunk.node.userData.mesh;
+  mesh.updateMatrixWorld(true);
+  mesh.matrixWorld.decompose(_wp, _wq, _ws);
+  const sy = bone.size[1];
+  const t = clamp(cutT == null ? 0.5 : cutT, 0.25, 0.75);
+  const hUp = sy * t, hDn = sy * (1 - t);
+  const yAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(_wq);
+  const cutWorld = _wp.clone().addScaledVector(yAxis, sy / 2 - hUp);
+
+  const makeStub = (h, offset) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(bone.size[0], h, bone.size[2]), MAT.botHot);
+    m.castShadow = true;
+    m.position.copy(_wp).addScaledVector(yAxis, offset);
+    m.quaternion.copy(_wq);
+    scene.add(m);
+    return { mesh:m, half:[bone.size[0]/2, h/2, bone.size[2]/2] };
+  };
+  const upStub = makeStub(hUp, sy / 2 - hUp / 2);
+  const dnStub = makeStub(hDn, -(sy / 2 - hDn / 2));
+  mesh.visible = false;
+
+  const upNames = trunk.name === 'torso' ? UPPER_HALF : ['pelvis'];
+  const dnNames = trunk.name === 'torso' ? LOWER_HALF : LOWER_HALF.filter(n => n !== 'pelvis');
+  const over = {};
+  over[trunk.name] = upStub;
+  makeRagdoll(r, upNames, {
+    override: over,
+    impulse: { x:dir.x * 2.6, y:2.4, z:dir.z * 2.6 },
+  });
+  // the lower half keeps the cut stub of the trunk welded on top of it
+  const lowerRag = makeRagdoll(r, dnNames, {
+    impulse: { x:-dir.x * 1.1, y:0.5, z:-dir.z * 1.1 },
+    parentOf: trunk.name === 'torso' ? {} : null,
+  });
+  const stubBody = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
+    .setTranslation(dnStub.mesh.position.x, dnStub.mesh.position.y, dnStub.mesh.position.z)
+    .setRotation(dnStub.mesh.quaternion)
+    .setLinearDamping(0.12).setAngularDamping(0.55));
+  const stubCol = world.createCollider(RAPIER.ColliderDesc
+    .cuboid(dnStub.half[0], dnStub.half[1], dnStub.half[2])
+    .setDensity(24).setFriction(0.95).setCollisionGroups(GRP_RAG), stubBody);
+  const stubEntry = { mesh:dnStub.mesh, body:stubBody, col:stubCol, name:'stub' };
+  tag(stubCol, { k:'rag', entry:stubEntry });
+  lowerRag.entries.push(stubEntry);
+  const anchorRoot = lowerRag.entries[0];
+  if (anchorRoot && anchorRoot !== stubEntry) {
+    try {
+      const bt = anchorRoot.body.translation(), bq = anchorRoot.body.rotation();
+      const a1 = dnStub.mesh.position.clone().sub(new THREE.Vector3(bt.x, bt.y, bt.z))
+        .applyQuaternion(new THREE.Quaternion(bq.x, bq.y, bq.z, bq.w).invert());
+      const jd = RAPIER.JointData.spherical({ x:a1.x, y:a1.y, z:a1.z }, { x:0, y:0, z:0 });
+      world.createImpulseJoint(jd, anchorRoot.body, stubBody, true);
+    } catch (e) { /* free-floating stub is fine */ }
+  }
+
+  scene.remove(r.rig.root);
+  burst(cutWorld, 60, 8, false);
+  burst(cutWorld.clone(), 40, 2, true);
+  clank(8, true);
+  shake = Math.min(0.9, shake + 0.55);
+  slowmo(0.42);
+  toast('BISECTED');
+  dropArmorPickup(r.pos.x, r.pos.z);
+  hud();
+}
+
 function sever(part, dirHint, cutT) {
   if (part.severed || part.robot.dead) return;
-  if (part.name === 'pelvis' || part.name === 'torso') { killRobot(part.robot, dirHint); return; }
+  if (part.name === 'pelvis' || part.name === 'torso') { bisectRobot(part.robot, part, cutT, dirHint); return; }
   const r = part.robot;
-  part.severed = true;
   const mesh = part.node.userData.mesh;
+  mesh.updateMatrixWorld(true);
   mesh.matrixWorld.decompose(_wp, _wq, _ws);
-  const b = BONE[part.name];
-  const dir = dirHint || new THREE.Vector3(Math.random()-0.5, 1, Math.random()-0.5);
+  const dir = (dirHint || new THREE.Vector3(Math.random()-0.5, 1, Math.random()-0.5)).clone().normalize();
   const hitPos = _wp.clone();
-  if (cutT != null) {
-    // true slice: the bone is cut in half wherever the edge went through
-    sliceChunks(part, cutT, dir);
-  } else {
-    makeDebris(mesh, hitPos, _wq.clone(), [b.size[0]/2, b.size[1]/2, b.size[2]/2],
-      { x:dir.x * 6, y:Math.abs(dir.y) * 5 + 3, z:dir.z * 6 });
-  }
-  // hide the rest of the sub-chain
-  part.node.visible = false;
-  dropBody(part.body, part.col);
+
+  // Gather every bone still hanging off this one. A severed forearm takes
+  // the hand with it; a severed upper arm takes the forearm AND hand with
+  // it — the whole cut-off chain flies off together instead of the rest of
+  // the limb staying glued to the (now invisible) stump.
+  const chain = [part.name];
   for (const nm in r.parts) {
     const p2 = r.parts[nm];
     if (p2 === part || p2.severed) continue;
     let q = p2.node.parent;
-    while (q) { if (q === part.node) { p2.severed = true; dropBody(p2.body, p2.col); break; } q = q.parent; }
+    while (q) { if (q === part.node) { chain.push(nm); break; } q = q.parent; }
   }
+
+  // fly the whole chain off as one real jointed piece — elbow/wrist still
+  // articulate as it tumbles, it doesn't just teleport away as a rigid lump.
+  const imp = 3.4 + Math.abs(dir.y) * 2.2 + chain.length * 0.4;
+  makeRagdoll(r, chain, {
+    impulse: { x:dir.x * imp, y:1.7 + Math.abs(dir.y) * 2, z:dir.z * imp },
+  });
+
   if (part.name === 'thighL' || part.name === 'thighR' || part.name === 'shinL' || part.name === 'shinR') r.crippled = true;
   if (part.name === 'handR' || part.name === 'forearmR' || part.name === 'upperArmR') dropBotSword(r);
   burst(hitPos, 26, 4, false);
   burst(hitPos.clone(), 10, 1, true);
-  if (part.name === 'head') killRobot(r, dir);
+  clank(7, true);
+  if (chain.includes('head') && !r.dead) killRobot(r, dir);
 }
 
 function dropBotSword(r) {
@@ -786,33 +1213,69 @@ function dropBotSword(r) {
     .setLinearDamping(0.3).setAngularDamping(0.6));
   world.createCollider(RAPIER.ColliderDesc.cuboid(c.th, c.w, c.len / 2)
     .setDensity(30).setCollisionGroups(GRP_DEBRIS), body);
-  body.applyImpulse({ x:(Math.random()-0.5)*8, y:4, z:(Math.random()-0.5)*8 }, true);
+  body.applyImpulse({ x:(Math.random()-0.5)*1.8, y:1.2, z:(Math.random()-0.5)*1.8 }, true);
   debris.push({ mesh:r.swordMesh, body });
   r.swordMesh = null;
 }
 
-function killRobot(r, dirHint) {
+function killRobot(r, dirHint, forceMag) {
   if (r.dead) return;
   r.dead = true; S.kills++;
   dropBotSword(r);
-  // whole skeleton collapses into ragdoll debris
-  for (const name in r.parts) {
-    const part = r.parts[name];
-    if (part.severed) continue;
-    part.severed = true;
-    const mesh = part.node.userData.mesh;
-    mesh.matrixWorld.decompose(_wp, _wq, _ws);
-    const b = BONE[name];
-    makeDebris(mesh, _wp.clone(), _wq.clone(), [b.size[0]/2, b.size[1]/2, b.size[2]/2],
-      { x:(Math.random()-0.5)*3, y:2 + Math.random()*3, z:(Math.random()-0.5)*3 });
-    dropBody(part.body, part.col);
-  }
+  forceMag = forceMag || 1;
+  // Death is a genuine ragdoll: every remaining bone becomes a jointed dynamic
+  // body, so the robot buckles, topples and can be knocked around afterwards.
+  // The harder the killing blow, the harder it flies — this isn't a canned
+  // death animation, the impulse actually reflects the hit.
+  const fall = (dirHint || new THREE.Vector3(Math.random()-.5, 0.2, Math.random()-.5)).clone();
+  fall.y = 0;
+  if (fall.lengthSq() < 0.01) fall.set(0, 0, 1);
+  fall.normalize();
+  const names = Object.keys(r.parts).filter(n => !r.parts[n].severed);
+  for (const nm in r.parts) { const p = r.parts[nm]; if (p.armorMesh) p.armorMesh = null; }
+  makeRagdoll(r, names, {
+    impulse: {
+      x: fall.x * 1.9 * forceMag + r.knock.x * 0.3,
+      y: 1.0 * Math.min(1.6, forceMag),
+      z: fall.z * 1.9 * forceMag + r.knock.z * 0.3,
+    },
+  });
   scene.remove(r.rig.root);
   const p = new THREE.Vector3(r.pos.x, 1, r.pos.z);
   burst(p, 40, 6, false);
   clank(6, false);
+  shake = Math.min(0.6, shake + 0.25 * forceMag);
+  slowmo(0.22);
   dropArmorPickup(r.pos.x, r.pos.z);
   hud();
+}
+
+// short punchy hit-stop, so a kill actually lands
+let timeScale = 1, slowT = 0;
+function slowmo(amount) { slowT = Math.max(slowT, amount); }
+function stepTime(dt) {
+  if (slowT > 0) { slowT = Math.max(0, slowT - dt); timeScale = 0.35; }
+  else timeScale += (1 - timeScale) * Math.min(1, dt * 6);
+}
+
+function stepCorpses(dt) {
+  for (const c of corpses) {
+    c.t = Math.min(1, c.t + dt * 2.4);
+    const k = 1 - Math.pow(1 - c.t, 3);
+    const n = c.rig.nodes, blend = Math.min(1, dt * 7);
+    c.rig.root.rotation.x = c.fall.z * 1.18 * k;
+    c.rig.root.rotation.z = -c.fall.x * 1.18 * k;
+    c.rig.root.position.y = c.startY + 0.18 * k;
+    n.torso.rotation.x += (-0.18 - n.torso.rotation.x) * blend;
+    n.upperArmL.rotation.z += (0.42 - n.upperArmL.rotation.z) * blend;
+    n.upperArmR.rotation.z += (-0.42 - n.upperArmR.rotation.z) * blend;
+    n.forearmL.rotation.x += (-0.55 - n.forearmL.rotation.x) * blend;
+    n.forearmR.rotation.x += (-0.55 - n.forearmR.rotation.x) * blend;
+    n.thighL.rotation.x += (0.20 - n.thighL.rotation.x) * blend;
+    n.thighR.rotation.x += (-0.12 - n.thighR.rotation.x) * blend;
+    n.shinL.rotation.x += (0.38 - n.shinL.rotation.x) * blend;
+    n.shinR.rotation.x += (0.28 - n.shinR.rotation.x) * blend;
+  }
 }
 
 /* ----------------------------------------------------------------- input */
@@ -935,68 +1398,22 @@ function driveSword(dt) {
   sword.quat.set(rot.x, rot.y, rot.z, rot.w);
   sword.gripWorld.copy(gripLocal(sword.cfg)).applyQuaternion(sword.quat).add(new THREE.Vector3(t.x, t.y, t.z));
 
+  // Save both ends of the real blade for continuous sweep tests. Rapier CCD
+  // handles most impacts, while this closes the thin-blade tunnelling gap.
+  sword.base.set(0, 0, sword.cfg.len / 2).applyQuaternion(cur).add(_tp.set(t.x, t.y, t.z));
+  sword.tip.set(0, 0, -sword.cfg.len / 2).applyQuaternion(cur).add(_tp.set(t.x, t.y, t.z));
+  if (!sword.sweepReady) {
+    sword.prevBase.copy(sword.base); sword.prevTip.copy(sword.tip); sword.sweepReady = true;
+  }
+
   sword.thrust = Math.max(0, sword.thrust - dt * 1.6);
   mouse.x *= (1 - dt * 0.6); mouse.y *= (1 - dt * 0.35);
 }
 
 /* ---------------------------------------------------------------- damage */
 const _n = new THREE.Vector3(), _e = new THREE.Vector3();
-const _hitA = new THREE.Vector3(), _hitB = new THREE.Vector3();
-const _hitAB = new THREE.Vector3(), _hitClosest = new THREE.Vector3();
-const _hitPoint = new THREE.Vector3(), _hitDelta = new THREE.Vector3(), _botTip = new THREE.Vector3();
-function segmentDistanceSq(point, a, b) {
-  _hitAB.subVectors(b, a);
-  const lenSq = _hitAB.lengthSq();
-  if (lenSq < 1e-8) return point.distanceToSquared(a);
-  const t = clamp(_hitDelta.subVectors(point, a).dot(_hitAB) / lenSq, 0, 1);
-  return point.distanceToSquared(_hitClosest.copy(a).addScaledVector(_hitAB, t));
-}
-function swordTip(out) {
-  const t = sword.body.translation(), q = sword.body.rotation();
-  return out.set(0, 0, -sword.cfg.len / 2)
-    .applyQuaternion(_q.set(q.x, q.y, q.z, q.w))
-    .add(_hitPoint.set(t.x, t.y, t.z));
-}
-function robotSwordTip(r, out) {
-  if (!r.swordBody || !r.swordMesh) return null;
-  const q = r.swordBody.rotation();
-  return out.set(0, 0, -r.swordCfg.len / 2)
-    .applyQuaternion(_q.set(q.x, q.y, q.z, q.w))
-    .add(r.swordMesh.position);
-}
-function manualCombatHits() {
-  const speed = sword.tipVel.length();
-  swordTip(_hitB);
-  _hitA.copy(sword.lastTip);
-
-  if (speed >= 1.6) {
-    for (const r of robots) {
-      if (r.dead) continue;
-      for (const name in r.parts) {
-        const part = r.parts[name];
-        if (part.severed || deadBodySet.has(part.body)) continue;
-        const t = part.body.translation();
-        _hitPoint.set(t.x, t.y, t.z);
-        const b = BONE[name];
-        const radius = 0.24 + Math.max(b.size[0], b.size[1], b.size[2]) * 0.55;
-        if (segmentDistanceSq(_hitPoint, _hitA, _hitB) <= radius * radius) {
-          swordHit(part);
-          if (r.dead) break;
-        }
-      }
-    }
-  }
-
-  const playerPos = player.body.translation();
-  _hitPoint.set(playerPos.x, playerPos.y, playerPos.z);
-  for (const r of robots) {
-    if (r.dead || r.swordTipSpeed < 3 || !r.swordBody || !r.swordMesh) continue;
-    robotSwordTip(r, _botTip);
-    if (_botTip.distanceToSquared(_hitPoint) < 0.85 * 0.85) botSwordHitsPlayer(r);
-  }
-}
 function swordHit(part) {
-  if (!part || !part.robot || part.robot.dead || part.severed || deadBodySet.has(part.body)) return;
+  if (part.robot.dead || part.severed) return;
   if (part.hitCd > 0) return;
   const speed = sword.tipVel.length();
   if (speed < 1.6) return;
@@ -1006,16 +1423,28 @@ function swordHit(part) {
   _e.set(0, 1, 0).applyQuaternion(_q);
   const align = Math.abs(_n.dot(_e));
   const blunt = sword.cfg.kind === 'mace';
-  const cut = !blunt && align > 0.42;
+  const cut = !blunt && align > 0.62;
   part.hitCd = cut ? 0.14 : 0.2;
   const massK = sword.cfg.density * sword.cfg.len / 1100;
-  let dmg = speed * speed * 0.26 * massK * sword.cfg.dmg * S.mods.dmg * (0.22 + 0.78 * align);
+  let dmg = speed * speed * 0.17 * massK * sword.cfg.dmg * S.mods.dmg * (0.12 + 0.88 * align);
   const r = part.robot;
   dmg *= (1 - r.armor) * (r.block > 0 ? 0.35 : 1);
   if (part.broken) dmg *= 1.6;      // a cracked bone gives way easily
-  if (part.name === 'head') dmg *= 1.8;
-  dmg = Math.min(dmg, 46);
-  part.hp -= dmg; r.hp -= dmg * 0.6;
+  if (part.name === 'head' || part.name === 'neck') dmg *= 1.5;
+  dmg = Math.min(dmg, 30);
+
+  // Bolted plate is permanent — it can't be shattered or torn off. It just
+  // absorbs almost the whole blow and rings/sparks, and it blocks any clean
+  // cut from reaching the bone underneath. That spot is genuinely protected.
+  const armored = !!part.armorMesh;
+  if (armored) {
+    armorSpark(part, _n, speed);
+    shake = Math.min(0.4, shake + speed * 0.008);
+    r.knock.x += _n.x * Math.min(2.2, speed * 0.1); r.knock.z += _n.z * Math.min(2.2, speed * 0.1);
+    r.stagger = Math.max(r.stagger, Math.min(0.7, speed * 0.04));
+    r.staggerMag = Math.max(r.staggerMag, Math.min(0.6, speed * 0.05));
+    dmg *= 0.1;                     // barely anything reaches the frame
+  }
 
   const t = part.body.translation();
   const p = new THREE.Vector3(t.x, t.y, t.z);
@@ -1023,10 +1452,14 @@ function swordHit(part) {
   clank(Math.min(8, speed * 0.5), cut);
   shake = Math.min(0.5, shake + speed * 0.012);
 
-  // knockback goes into the robot's root velocity — never into loose limbs
-  const push = Math.min(4.5, speed * 0.22);
-  r.vel.x += _n.x * push; r.vel.z += _n.z * push;
-  r.stagger = Math.max(r.stagger, Math.min(1.2, speed * 0.07));
+  // real knockback into a decaying push vector (see stepAI), scaled by how
+  // heavy and blunt the weapon is — a mace sends a robot reeling, a light
+  // sword thrust barely rocks it.
+  const forceMul = (blunt ? 1.9 : 1.0) * clamp(massK, 0.6, 2.4);
+  const push = Math.min(8, speed * 0.24 * forceMul);
+  r.knock.x += _n.x * push; r.knock.z += _n.z * push;
+  r.stagger = Math.max(r.stagger, Math.min(1.4, speed * 0.07 * forceMul));
+  r.staggerMag = Math.max(r.staggerMag, Math.min(1, speed * 0.05 * forceMul));
 
   // where along the bone the edge crossed — used as the cut plane
   const bt = part.body.translation();
@@ -1037,13 +1470,43 @@ function swordHit(part) {
   const size = BONE[part.name].size[1];
   const cutT = clamp(0.5 - localY.y / size, 0.15, 0.85);
 
+  // A real cut needs commitment: aligned edge AND genuine tip speed. Anything
+  // less just fractures the bone and leaves the limb hanging.
+  const cleanCut = cut && align > 0.80 && speed > 11 && !armored;
+
+  // A neck slice is lethal on its own — this doesn't need the head to come
+  // off. A solid, aligned edge across the throat kills outright, the same
+  // hit that would only "hurt" anywhere else. Armor over it blocks this.
+  if (part.name === 'neck' && cut && !armored && align > 0.72 && speed > 7 && !r.dead) {
+    part.hp -= dmg; r.hp = 0;
+    killRobot(r, _n.clone(), clamp(speed / 10, 1, 2.8));
+    return;
+  }
+
+  // A swing hit hard and clean enough takes the limb straight off, however
+  // much health it had left — force does the cutting, not a depleted bar.
+  if (cleanCut && !r.dead && speed >= severSpeedFor(part.name)) {
+    part.hp -= dmg;
+    sever(part, _n.clone(), cutT);
+    if (r.hp <= 0 && !r.dead) killRobot(r, _n.clone(), clamp(speed / 10, 1, 2.8));
+    return;
+  }
+
+  part.hp -= dmg; r.hp -= dmg * 0.42;
+
   if (part.hp <= 0) {
-    if (cut && speed > 5) sever(part, _n.clone(), cutT);       // sliced clean through
-    else { sever(part, _n.clone()); }                          // torn off at the joint
-  } else if (!part.broken && !cut && dmg > 8 && part.hp < part.maxHp * 0.6) {
+    if (cleanCut) sever(part, _n.clone(), cutT);
+    else if (cut && speed > 8 && !armored) sever(part, _n.clone(), cutT);
+    else breakBone(part, _n.clone());
+  } else if (cleanCut && (part.name === 'torso' || part.name === 'pelvis')
+             && speed > 15 && part.hp < part.maxHp * 0.55) {
+    // a truly brutal swing through a softened trunk cuts straight through
+    bisectRobot(r, part, cutT, _n.clone());
+    return;
+  } else if (!part.broken && !cut && speed > 10 && dmg > 10 && part.hp < part.maxHp * 0.6) {
     breakBone(part, _n.clone());
   }
-  if (r.hp <= 0) killRobot(r, _n.clone());
+  if (r.hp <= 0 && !r.dead) killRobot(r, _n.clone(), clamp(speed / 10, 1, 2.8));
 }
 
 function bladeClash(r) {
@@ -1062,7 +1525,7 @@ function bladeClash(r) {
 }
 
 function botSwordHitsPlayer(r) {
-  if (!r || r.dead || !r.swordTipSpeed || player.hurtCd > 0) return;
+  if (r.dead || player.hurtCd > 0) return;
   if (r.state !== 'strike') return;               // only a committed swing bites
   if (r.swordTipSpeed < 3.0) return;
   player.hurtCd = 0.55;
@@ -1143,7 +1606,9 @@ function stepAI(dt) {
       T.shR = -2.9 + k * 3.4; T.elR = -1.5 + k * 1.2; T.spine = -0.3 + k * 0.7;
       T.shL = -1.4 + k * 0.5; T.elL = -1.1 + k * 0.4;
     } else if (r.state === 'stagger') {
-      T.shR = -0.7; T.elR = -0.7; T.spine = 0.4; T.shL = -0.4; T.elL = -0.5;
+      const m = r.staggerMag;
+      T.shR = -0.7 - m * 0.5; T.elR = -0.7 - m * 0.3; T.spine = 0.25 + m * 0.55;
+      T.shL = -0.4 - m * 0.5; T.elL = -0.5 - m * 0.3; T.headY = -0.2 - m * 0.5;
     } else if (r.block > 0) {
       T.shR = -1.9; T.elR = -1.9; T.spine = 0.1; T.shL = -1.6; T.elL = -1.5;
     } else {
@@ -1176,9 +1641,16 @@ function stepAI(dt) {
     r.vel.y = 0;
     if (r.vel.length() > 9) r.vel.setLength(9);
     r.pos.addScaledVector(r.vel, dt);
+    // real knockback: a separate, physically-decaying push so a hit actually
+    // shoves the robot instead of being swallowed by the walk-velocity lerp
+    // the very next frame.
+    r.pos.addScaledVector(r.knock, dt);
+    r.knock.multiplyScalar(Math.max(0, 1 - dt * 3.4));
+    if (r.knock.length() > 15) r.knock.setLength(15);
+    r.staggerMag = Math.max(0, r.staggerMag - dt * 1.6);
     r.pos.x = clamp(r.pos.x, -ARENA + 1, ARENA - 1);
     r.pos.z = clamp(r.pos.z, -ARENA + 1, ARENA - 1);
-    if (!isFinite(r.pos.x) || !isFinite(r.pos.z)) { r.pos.set(0, 0, 0); r.vel.set(0, 0, 0); }
+    if (!isFinite(r.pos.x) || !isFinite(r.pos.z)) { r.pos.set(0, 0, 0); r.vel.set(0, 0, 0); r.knock.set(0, 0, 0); }
 
     poseRobot(r, dt);
   }
@@ -1223,9 +1695,9 @@ function stepPlayer(dt) {
       if (r.dead) continue;
       const dx = r.pos.x - t.x, dz = r.pos.z - t.z, d = Math.hypot(dx, dz) || 1;
       if (d < 2.4 && (dx / d) * f.x + (dz / d) * f.z > 0.4) {
-        r.vel.x += f.x * 7; r.vel.z += f.z * 7;
-        r.hp -= 6; r.stagger = 0.8; clank(3, false);
-        if (r.hp <= 0) killRobot(r);
+        r.knock.x += f.x * 7; r.knock.z += f.z * 7;
+        r.hp -= 6; r.stagger = 0.8; r.staggerMag = Math.max(r.staggerMag, 0.6); clank(3, false);
+        if (r.hp <= 0) killRobot(r, new THREE.Vector3(f.x, 0, f.z), 1.2);
       }
     }
   }
@@ -1285,10 +1757,10 @@ const $ = id => document.getElementById(id);
 function hud() {
   $('hpfill').style.width = Math.max(0, player.hp / S.mods.maxHp * 100) + '%';
   $('wave').textContent = S.wave; $('kills').textContent = S.kills; $('best').textContent = S.best;
-  $('armor').textContent = Math.round(S.mods.armor * 100) + '%';
+  $('armor').textContent = Math.round(S.mods.armor * 100) + '% (' + (S.armorPlates || 0) + ')';
   $('edge').textContent = 'EDGE ' + Math.round((sword.edge * 180 / Math.PI) % 360) + '\u00b0 \u2014 ' + sword.cfg.label.toUpperCase();
 }
-let spawnQueue = 0, spawnTimer = 0, waveActive = false;
+let spawnQueue = 0, spawnTimer = 0, waveActive = false, waveGap = 0;
 function startWave() {
   waveActive = true;
   spawnQueue = 2 + Math.floor(S.wave * 1.4);
@@ -1301,7 +1773,13 @@ function startWave() {
   hud();
 }
 function stepWaves(dt) {
-  if (!waveActive) return;
+  if (!waveActive) {
+    if (waveGap > 0) {
+      waveGap -= dt;
+      if (waveGap <= 0) { S.wave++; toast('WAVE ' + S.wave); startWave(); }
+    }
+    return;
+  }
   if (spawnQueue > 0) {
     spawnTimer -= dt;
     if (spawnTimer <= 0) {
@@ -1312,38 +1790,11 @@ function stepWaves(dt) {
     }
     return;
   }
-  if (robots.every(r => r.dead)) { waveActive = false; offerUpgrades(); }
+  if (robots.every(r => r.dead)) { waveActive = false; waveGap = 3.0; }
 }
 
-const UPGRADES = [
-  { t:'Longsword',  d:'Balanced reach and speed.',                 f:() => buildSword('longsword') },
-  { t:'Greatsword', d:'+55% damage, heavy and slow to redirect.',  f:() => buildSword('greatsword') },
-  { t:'Mace',       d:'Blunt mass. Crushes armor, poor cuts.',     f:() => buildSword('mace') },
-  { t:'Spear',      d:'Huge reach, light, thrust-focused.',        f:() => buildSword('spear') },
-  { t:'Plating',    d:'-18% damage taken, -8% swing speed.',       f:() => { S.mods.armor = Math.min(0.7, S.mods.armor + 0.18); S.mods.swingSpeed *= 0.92; } },
-  { t:'Heavy Arms', d:'+20% swing damage.',                        f:() => { S.mods.dmg *= 1.2; } },
-  { t:'Servo Boost',d:'+12% swing speed.',                         f:() => { S.mods.swingSpeed *= 1.12; } },
-  { t:'Gyro Core',  d:'Better balance — swings pull you less.',    f:() => { S.mods.balance *= 1.5; } },
-  { t:'Cell Pack',  d:'+30 max health and refill.',                f:() => { S.mods.maxHp += 30; player.hp = S.mods.maxHp; } },
-  { t:'Field Repair',d:'Restore health to full.',                  f:() => { player.hp = S.mods.maxHp; } },
-];
-function offerUpgrades() {
-  document.exitPointerLock();
-  S.paused = true;
-  const pool = UPGRADES.filter(u => !(u.f.toString().includes(`'${S.weapon}'`)));
-  const pick = [];
-  while (pick.length < 3 && pool.length) pick.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
-  $('upTitle').textContent = 'WAVE ' + S.wave + ' CLEARED';
-  const c = $('cards'); c.innerHTML = '';
-  for (const u of pick) {
-    const el = document.createElement('div'); el.className = 'card';
-    el.innerHTML = '<b>' + u.t + '</b>' + u.d;
-    el.onclick = () => { u.f(); $('upgrade').classList.remove('on'); S.paused = false; clearDebris(); S.wave++; startWave(); renderer.domElement.requestPointerLock(); hud(); };
-    c.appendChild(el);
-  }
-  $('upgrade').classList.add('on');
-}
 function clearDebris() {
+  clearRagdolls();
   for (const r of robots) {
     if (!r.dead) {
       for (const nm in r.parts) { const p = r.parts[nm]; if (!p.severed) { p.severed = true; dropBody(p.body, p.col); } }
@@ -1356,6 +1807,8 @@ function clearDebris() {
   robots.length = 0;
   for (const d of debris) { scene.remove(d.mesh); dropBody(d.body); }
   debris.length = 0;
+  for (const c of corpses) scene.remove(c.rig.root);
+  corpses.length = 0;
   flushBodies();
 }
 
@@ -1376,7 +1829,8 @@ function togglePause() {
 function reset() {
   clearDebris();
   clearPickups();
-  S.wave = 1; S.kills = 0; S.over = false;
+  S.wave = 1; S.kills = 0; S.over = false; waveGap = 0; S.armorPlates = 0;
+  updateHeroArmor();
   S.mods = { dmg:1, swingSpeed:1, armor:0, balance:1, recovery:1, maxHp:100 };
   buildSword('longsword');
   player.hp = S.mods.maxHp;
@@ -1398,6 +1852,62 @@ $('resumeBtn').onclick = togglePause;
 $('quitBtn').onclick = () => { S.paused = false; $('pause').classList.remove('on'); die(); };
 const sensEl = $('sens'); sensEl.value = S.sens; $('sensv').textContent = S.sens.toFixed(1) + 'x';
 sensEl.oninput = () => { S.sens = +sensEl.value; $('sensv').textContent = S.sens.toFixed(1) + 'x'; localStorage.setItem('scrap_sens', S.sens); };
+
+function fitFullBodyArmor(rig) {
+  if (!rig || !rig.parts) return;
+  const p = rig.parts;
+
+  // Remove only armor pieces previously created by this helper.
+  if (rig.__armor) {
+    for (const a of rig.__armor) a.parent?.remove(a);
+  }
+  rig.__armor = [];
+  const add = (parent, mesh) => {
+    if (!parent) return;
+    parent.add(mesh);
+    rig.__armor.push(mesh);
+  };
+
+  // Head: helmet is a real shell around the skull, with a slight rear wrap.
+  const head = p.head?.mesh || p.head?.group || p.head;
+  if (head?.add) {
+    const h = armorHelmet(0.29, 0.58);
+    h.position.set(0, 0.015, 0);
+    h.scale.set(1.08, 1.0, 1.12);
+    add(head, h);
+  }
+
+  // Chest: rounded shell extends around front and sides, rather than sitting
+  // as a thin rectangle on the front.
+  const chest = p.chest?.mesh || p.chest?.group || p.chest || p.torso?.mesh || p.torso;
+  if (chest?.add) {
+    const c = armorTorso(0.72, 0.78, 0.52);
+    c.position.set(0, 0, 0);
+    add(chest, c);
+  }
+
+  // Arm armor: upper-arm and forearm shells.
+  for (const key of ["leftUpperArm","rightUpperArm","leftArm","rightArm"]) {
+    const part = p[key]?.mesh || p[key]?.group || p[key];
+    if (part?.add) add(part, armorCapsule(0.16, 0.30));
+  }
+  for (const key of ["leftForearm","rightForearm"]) {
+    const part = p[key]?.mesh || p[key]?.group || p[key];
+    if (part?.add) add(part, armorCapsule(0.145, 0.28));
+  }
+
+  // Leg armor: thigh + shin shells.
+  for (const key of ["leftThigh","rightThigh","leftLeg","rightLeg"]) {
+    const part = p[key]?.mesh || p[key]?.group || p[key];
+    if (part?.add) add(part, armorCapsule(0.19, 0.38));
+  }
+  for (const key of ["leftShin","rightShin","leftLowerLeg","rightLowerLeg"]) {
+    const part = p[key]?.mesh || p[key]?.group || p[key];
+    if (part?.add) add(part, armorCapsule(0.155, 0.34));
+  }
+}
+
+
 document.addEventListener('pointerlockchange', () => {
   if (!document.pointerLockElement && S.running && !S.paused && !S.over) togglePause();
 });
@@ -1437,12 +1947,66 @@ function physics(dt) {
   if (FLAGS.waves) stepWaves(dt);
   stepPickups(dt);
   flushBodies();               // safe point: nothing is iterating contacts yet
-  // Combat is sampled directly below, so no queued collision handles are
-  // created that could outlive a severed limb or dropped sword.
-  world.step();
+  world.step(events);
 
-  // Combat is intentionally resolved outside Rapier contact iteration.
-  manualCombatHits();
+  // your blade: sample every contact (a slicing swing slides without re-triggering)
+  // Contacts are collected first, then resolved — mutating the physics world
+  // from inside the callback is what used to blow the wasm module up.
+  const hits = [];
+  try {
+    world.contactPairsWith(sword.collider, (other) => {
+      const t = reg.get(other.handle);
+      if (t) hits.push(t);
+    });
+    world.contactPairsWith(player.col, (other) => {
+      const t = reg.get(other.handle);
+      if (t && t.k === 'botsword') hits.push({ k:'hurt', robot:t.robot });
+    });
+  } catch (e) { /* a collider died this frame; skip the rest */ }
+
+  // Continuous blade collision: sample the swept blade volume between fixed
+  // steps. This makes fast mouse cuts and sword-on-sword parries register even
+  // when the very thin colliders cross completely between Rapier frames.
+  const pointSegmentDistSq = (p, a, b) => {
+    const ab = _a.copy(b).sub(a);
+    const den = ab.lengthSq();
+    const u = den > 1e-8 ? clamp(_b.copy(p).sub(a).dot(ab) / den, 0, 1) : 0;
+    return _c.copy(a).addScaledVector(ab, u).distanceToSquared(p);
+  };
+  const seen = new Set(hits.filter(h => h.k === 'part').map(h => h.part));
+  for (let sample = 0; sample <= 3; sample++) {
+    const k = sample / 3;
+    const a = new THREE.Vector3().lerpVectors(sword.prevBase, sword.base, k);
+    const b = new THREE.Vector3().lerpVectors(sword.prevTip, sword.tip, k);
+    for (const r of robots) {
+      if (r.dead) continue;
+      for (const name in r.parts) {
+        const part = r.parts[name];
+        if (part.severed || seen.has(part)) continue;
+        const bt = part.body.translation();
+        const center = _d2.set(bt.x, bt.y, bt.z);
+        const bs = BONE[name].size;
+        const radius = Math.max(bs[0], bs[2]) * 0.72 + sword.cfg.th * 1.5;
+        if (pointSegmentDistSq(center, a, b) <= radius * radius) {
+          seen.add(part); hits.push({ k:'part', part });
+        }
+      }
+      if (r.swordBody && r.swordMesh && !hits.some(h => h.k === 'botsword' && h.robot === r)) {
+        const rs = r.swordBody.translation();
+        if (pointSegmentDistSq(_d2.set(rs.x, rs.y, rs.z), a, b) < 0.20 * 0.20) hits.push({ k:'botsword', robot:r });
+      }
+    }
+  }
+  for (const t of hits) {
+    try {
+      if (t.k === 'part') swordHit(t.part);
+      else if (t.k === 'rag') ragHit(t.entry);
+      else if (t.k === 'botsword') bladeClash(t.robot);
+      else if (t.k === 'hurt') botSwordHitsPlayer(t.robot);
+    } catch (e) { console.warn('hit skipped', e); }
+  }
+  sword.prevBase.copy(sword.base);
+  sword.prevTip.copy(sword.tip);
   flushBodies();
 }
 
@@ -1480,11 +2044,14 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   if (S.running && !S.paused) {
-    acc += dt;
+    stepTime(dt);
+    acc += dt * timeScale;
     let n = 0;
     while (acc >= FIXED && n++ < 5) { physics(FIXED); acc -= FIXED; }
   }
   stepSparks(dt);
+  stepCorpses(dt);
+  stepRagdolls(dt);
 
   const pt = player.body.translation();
   shake = Math.max(0, shake - dt * 2.2);
@@ -1520,13 +2087,18 @@ hud();
 requestAnimationFrame(frame);
 window.__gameReady = true;
 window.__testSpawn = (x, z) => spawnRobot(x, z, 1);
-window.__setMouse = (x, y) => {y) => { mouse.x = x; mouse.y = y; };
+window.__setMouse = (x, y) => { mouse.x = x; mouse.y = y; };
 window.__testCarve = () => {
   const r = robots.find(x => !x.dead); if (!r) return 'none';
   sever(r.parts.forearmR, new THREE.Vector3(1, 1, 0), 0.5);
   breakBone(r.parts.thighL, new THREE.Vector3(1, 0, 0));
   sever(r.parts.shinR, new THREE.Vector3(0, 1, 1), 0.35);
   return { debris: debris.length, pickups: pickups.length };
+};
+window.__testBisect = () => {
+  const r = robots.find(x => !x.dead); if (!r) return 'none';
+  bisectRobot(r, r.parts.torso, 0.5, new THREE.Vector3(1, 0.2, 0));
+  return { ragdolls: ragdolls.length, pickups: pickups.length };
 };
 window.__testKillAll = () => { for (const r of [...robots]) killRobot(r); return debris.length; };
 window.__robotHp = () => robots.map(r => ({ hp:+r.hp.toFixed(1), dead:r.dead, crip:r.crippled, state:r.state,
@@ -1540,5 +2112,15 @@ window.__dbg = () => ({
   robots: robots.length, alive: robots.filter(r => !r.dead).length, hp: +player.hp.toFixed(1),
 });
 </script>
+
+<script>
+window.addEventListener('error', function (e) {
+  console.error('[Arcade runtime error]', e.error || e.message, 'at', e.filename, e.lineno + ':' + e.colno);
+});
+window.addEventListener('unhandledrejection', function (e) {
+  console.error('[Arcade promise error]', e.reason);
+});
+</script>
+
 </body>
 </html>
