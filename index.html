@@ -612,7 +612,7 @@ oilGeo.setAttribute('position',new THREE.BufferAttribute(oilPos,3));
 const oilMat=new THREE.PointsMaterial({color:0x352817,size:0.11,transparent:true,opacity:0.95});
 const oilPoints=new THREE.Points(oilGeo,oilMat); oilPoints.frustumCulled=false; scene.add(oilPoints);
 let oilI=0;
-functionfor(let i=0;i<n;i++){const j=(oilI=(oilI+1)%OILN)*3;oilPos[j]=p.x;oilPos[j+1]=p.y;oilPos[j+2]=p.z;const s=0.7+Math.random()*power;oilVel[j]=(Math.random()-.5)*s;oilVel[j+1]=Math.random()*s*0.75;oilVel[j+2]=(Math.random()-.5)*s;oilLife[oilI]=0.9+Math.random()*1.2;}}
+function oilSplash(p,n=10,power=2){n=Math.min(n*2,OILN);for(let i=0;i<n;i++){const j=(oilI=(oilI+1)%OILN)*3;oilPos[j]=p.x;oilPos[j+1]=p.y;oilPos[j+2]=p.z;const s=0.7+Math.random()*power;oilVel[j]=(Math.random()-.5)*s;oilVel[j+1]=Math.random()*s*0.75;oilVel[j+2]=(Math.random()-.5)*s;oilLife[oilI]=0.9+Math.random()*1.2;}}
 function stepOil(dt){for(let i=0;i<OILN;i++){if(oilLife[i]<=0){oilPos[i*3+1]=-50;continue;}oilLife[i]-=dt;oilVel[i*3+1]-=10*dt;oilPos[i*3]+=oilVel[i*3]*dt;oilPos[i*3+1]+=oilVel[i*3+1]*dt;oilPos[i*3+2]+=oilVel[i*3+2]*dt;if(oilPos[i*3+1]<0.03){oilPos[i*3+1]=0.03;oilVel[i*3]*=.25;oilVel[i*3+1]=0;oilVel[i*3+2]*=.25;}}oilGeo.attributes.position.needsUpdate=true;}
 let sparkI = 0;
 function burst(p, n, power, oil) {
@@ -1553,7 +1553,8 @@ function startRobotKO(r, dir, duration=2.6){
   const d=(dir||new THREE.Vector3(0,0,1)).clone(); d.y=0; if(d.lengthSq()<.01)d.set(0,0,1); d.normalize();
   r.koRag=makeRagdoll(r,names,{noJoints:true,impulse:{x:d.x*1.4,y:1.8,z:d.z*1.4}});
   // Make the knockout unmistakable: a short oil burst and a heavy metallic thump.
-  const t=new THREE.Vector3(r.pos.x,r.bob+0.9,r.pos.z); burst(t,18,4,false); clank(5,false);
+  const t=new THREE.Vector3(r.pos.x,r.bob+0.9,r.pos.z);
+  oilSplash(t,42,3.2); burst(t,18,4,false); clank(5,false);
 }
 function restoreRobotFromKO(r){
   const rag=r.koRag; if(!rag)return;
@@ -1666,7 +1667,7 @@ function swordHit(part) {
   const p = new THREE.Vector3(t.x, t.y, t.z);
   if(barbed) lodgeBarbedSpear(r, part, p, _n);
   burst(p, cut ? 18 : 9, Math.min(8, speed * 0.4), !cut);
-
+  oilSplash(p, cut ? 115 : 38, cut ? Math.min(10,speed*.34) : 3.0);
   if(cut) showCutArc(p,_n.clone());
   // Blunt hits can bruise/dent the shell without disabling the robot.
   if(blunt){
@@ -1710,7 +1711,7 @@ function swordHit(part) {
   // off. A solid, aligned edge across the throat kills outright, the same
   // hit that would only "hurt" anywhere else. Armor over it blocks this.
   if ((part.name === 'torso' || part.name === 'pelvis') && cut && !armored && edgeAlign > 0.48 && speed > 3.6 && !r.dead) {
-
+    oilSplash(p, 120, Math.min(8, speed*.35));
     bisectRobot(r, part, cutT, _n.clone());
     return;
   }
@@ -1732,7 +1733,7 @@ function swordHit(part) {
   if (cleanCut && !r.dead && speed >= Math.min(severSpeedFor(part.name) * 0.48, 6.5)) {
     part.hp -= dmg;
     sever(part, _n.clone(), cutT);
-
+    oilSplash(p, 150, Math.min(9, speed*0.42));
     if (r.hp <= 0 && !r.dead) killRobot(r, _n.clone(), clamp(speed / 10, 1, 2.8));
     return;
   }
@@ -1747,7 +1748,7 @@ function swordHit(part) {
   }
   if (part.hp <= 0) {
     if (cleanCut) sever(part, _n.clone(), cutT);
-    else if (cut && speed > 6.5 && !armored) { sever(part, _n.clone(), cutT); }
+    else if (cut && speed > 6.5 && !armored) { sever(part, _n.clone(), cutT); oilSplash(p, 130, 7.0); }
     else breakBone(part, _n.clone());
   } else if (cleanCut && (part.name === 'torso' || part.name === 'pelvis')
              && speed > 3.6) {
