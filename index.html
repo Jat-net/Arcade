@@ -849,47 +849,92 @@ function poseRobot(r, dt) {
   n.footL.rotation.set(-gait * 0.25, 0, 0);
   n.footR.rotation.set(gait * 0.25, 0, 0);
   if (r.surrender) {
-    // Surrender is deliberately not a teleport-to-knees. It has three readable
-    // beats: collapse, recover, then kneel and beg.
-    const fall = clamp(r.phase / 0.58, 0, 1);
-    const recover = clamp((r.phase - 0.48) / 0.55, 0, 1);
-    const kneel = clamp((r.phase - 0.88) / 0.72, 0, 1);
-    const fallEase = fall * fall * (3 - 2 * fall);
-    const recoverEase = recover * recover * (3 - 2 * recover);
-    const kneelEase = kneel * kneel * (3 - 2 * kneel);
-    const hitFlinch = r.begHitTimer > 0 ? Math.sin((r.begHitTimer/0.65)*Math.PI) : 0;
+    // Surrender sequence: fall -> stay ragdolled on ground for 2 seconds
+    // -> recover -> kneel and beg.
+    const GROUND_HOLD = 2.0;
 
-    // Collapse sideways/forward onto the ground first.
-    n.pelvis.position.y = THREE.MathUtils.lerp(0.95, 0.34, fallEase);
-    n.pelvis.rotation.z = THREE.MathUtils.lerp(0, 1.05, fallEase) * (r.fallSide || 1);
-    n.pelvis.rotation.x = THREE.MathUtils.lerp(0.03, 1.05, fallEase);
-    n.torso.rotation.x = THREE.MathUtils.lerp(0.06, 1.35, fallEase) + hitFlinch*0.45;
-    n.thighL.rotation.x = THREE.MathUtils.lerp(-0.05, 0.45, fallEase);
-    n.thighR.rotation.x = THREE.MathUtils.lerp(-0.05, 0.45, fallEase);
-    n.shinL.rotation.x = THREE.MathUtils.lerp(0.08, 0.65, fallEase);
-    n.shinR.rotation.x = THREE.MathUtils.lerp(0.08, 0.65, fallEase);
-    n.upperArmL.rotation.set(THREE.MathUtils.lerp(P.shL, 1.0, fallEase),0,0.55);
-    n.upperArmR.rotation.set(THREE.MathUtils.lerp(P.shR, 1.0, fallEase),0,-0.55);
-    n.forearmL.rotation.x = THREE.MathUtils.lerp(P.elL, 0.8, fallEase);
-    n.forearmR.rotation.x = THREE.MathUtils.lerp(P.elR, 0.8, fallEase);
+    if (r.surrenderStage === 'fall') {
+      const t = clamp(r.phase / 0.65, 0, 1);
+      const e = t * t * (3 - 2 * t);
+      const hitFlinch = r.begHitTimer > 0 ? Math.sin((r.begHitTimer/0.65)*Math.PI) : 0;
 
-    // Roll/push back toward upright after hitting the ground.
-    n.pelvis.rotation.z = THREE.MathUtils.lerp(n.pelvis.rotation.z, 0.18*(r.fallSide||1), recoverEase);
-    n.pelvis.rotation.x = THREE.MathUtils.lerp(n.pelvis.rotation.x, 0.65, recoverEase);
+      n.pelvis.position.y = THREE.MathUtils.lerp(0.95, 0.28, e);
+      n.pelvis.rotation.z = THREE.MathUtils.lerp(0, 1.12, e) * (r.fallSide || 1);
+      n.pelvis.rotation.x = THREE.MathUtils.lerp(0.03, 1.15, e);
+      n.torso.rotation.x = THREE.MathUtils.lerp(0.06, 1.45, e) + hitFlinch*0.45;
+      n.thighL.rotation.x = THREE.MathUtils.lerp(-0.05, 0.5, e);
+      n.thighR.rotation.x = THREE.MathUtils.lerp(-0.05, 0.5, e);
+      n.shinL.rotation.x = THREE.MathUtils.lerp(0.08, 0.7, e);
+      n.shinR.rotation.x = THREE.MathUtils.lerp(0.08, 0.7, e);
+      n.upperArmL.rotation.set(THREE.MathUtils.lerp(P.shL, 1.1, e),0,0.55);
+      n.upperArmR.rotation.set(THREE.MathUtils.lerp(P.shR, 1.1, e),0,-0.55);
+      n.forearmL.rotation.x = THREE.MathUtils.lerp(P.elL, 0.9, e);
+      n.forearmR.rotation.x = THREE.MathUtils.lerp(P.elR, 0.9, e);
 
-    // Finally settle onto both knees with raised hands.
-    n.pelvis.position.y = THREE.MathUtils.lerp(n.pelvis.position.y, 0.72, kneelEase);
-    n.pelvis.rotation.x = THREE.MathUtils.lerp(n.pelvis.rotation.x, 0.95, kneelEase);
-    n.pelvis.rotation.z = THREE.MathUtils.lerp(n.pelvis.rotation.z, 0, kneelEase);
-    n.thighL.rotation.x = THREE.MathUtils.lerp(n.thighL.rotation.x, -1.05, kneelEase);
-    n.thighR.rotation.x = THREE.MathUtils.lerp(n.thighR.rotation.x, -1.05, kneelEase);
-    n.shinL.rotation.x = THREE.MathUtils.lerp(n.shinL.rotation.x, 1.55, kneelEase);
-    n.shinR.rotation.x = THREE.MathUtils.lerp(n.shinR.rotation.x, 1.55, kneelEase);
-    n.torso.rotation.x = THREE.MathUtils.lerp(n.torso.rotation.x, 0.55, kneelEase);
-    n.upperArmL.rotation.set(THREE.MathUtils.lerp(n.upperArmL.rotation.x,-0.9,kneelEase),0,0.35);
-    n.upperArmR.rotation.set(THREE.MathUtils.lerp(n.upperArmR.rotation.x,-0.9,kneelEase),0,-0.35);
-    n.forearmL.rotation.x = THREE.MathUtils.lerp(n.forearmL.rotation.x,1.0,kneelEase);
-    n.forearmR.rotation.x = THREE.MathUtils.lerp(n.forearmR.rotation.x,1.0,kneelEase);
+      if (r.phase >= 0.65) {
+        r.surrenderStage = 'ground';
+        r.phase = 0;
+      }
+
+    } else if (r.surrenderStage === 'ground') {
+      // Fully ragdolled on the ground. Hold here for 2 seconds.
+      n.pelvis.position.y = 0.28;
+      n.pelvis.rotation.z = 1.12 * (r.fallSide || 1);
+      n.pelvis.rotation.x = 1.15;
+      n.torso.rotation.x = 1.45;
+      n.thighL.rotation.x = 0.5;
+      n.thighR.rotation.x = 0.5;
+      n.shinL.rotation.x = 0.7;
+      n.shinR.rotation.x = 0.7;
+      n.upperArmL.rotation.set(1.1,0,0.55);
+      n.upperArmR.rotation.set(1.1,0,-0.55);
+      n.forearmL.rotation.x = 0.9;
+      n.forearmR.rotation.x = 0.9;
+
+      if (r.phase >= GROUND_HOLD) {
+        r.surrenderStage = 'recover';
+        r.phase = 0;
+      }
+
+    } else if (r.surrenderStage === 'recover') {
+      const t = clamp(r.phase / 0.8, 0, 1);
+      const e = t * t * (3 - 2 * t);
+
+      n.pelvis.position.y = THREE.MathUtils.lerp(0.28, 0.72, e);
+      n.pelvis.rotation.z = THREE.MathUtils.lerp(1.12 * (r.fallSide || 1), 0.18 * (r.fallSide || 1), e);
+      n.pelvis.rotation.x = THREE.MathUtils.lerp(1.15, 0.65, e);
+      n.torso.rotation.x = THREE.MathUtils.lerp(1.45, 0.75, e);
+      n.thighL.rotation.x = THREE.MathUtils.lerp(0.5, -0.65, e);
+      n.thighR.rotation.x = THREE.MathUtils.lerp(0.5, -0.65, e);
+      n.shinL.rotation.x = THREE.MathUtils.lerp(0.7, 1.0, e);
+      n.shinR.rotation.x = THREE.MathUtils.lerp(0.7, 1.0, e);
+      n.upperArmL.rotation.set(THREE.MathUtils.lerp(1.1, -0.45, e),0,0.45);
+      n.upperArmR.rotation.set(THREE.MathUtils.lerp(1.1, -0.45, e),0,-0.45);
+      n.forearmL.rotation.x = THREE.MathUtils.lerp(0.9, 0.7, e);
+      n.forearmR.rotation.x = THREE.MathUtils.lerp(0.9, 0.7, e);
+
+      if (r.phase >= 0.8) {
+        r.surrenderStage = 'kneel';
+        r.phase = 0;
+      }
+
+    } else if (r.surrenderStage === 'kneel') {
+      const t = clamp(r.phase / 0.65, 0, 1);
+      const e = t * t * (3 - 2 * t);
+
+      n.pelvis.position.y = THREE.MathUtils.lerp(0.72, 0.68, e);
+      n.pelvis.rotation.x = THREE.MathUtils.lerp(0.65, 0.95, e);
+      n.pelvis.rotation.z = THREE.MathUtils.lerp(0.18 * (r.fallSide || 1), 0, e);
+      n.thighL.rotation.x = THREE.MathUtils.lerp(-0.65, -1.05, e);
+      n.thighR.rotation.x = THREE.MathUtils.lerp(-0.65, -1.05, e);
+      n.shinL.rotation.x = THREE.MathUtils.lerp(1.0, 1.55, e);
+      n.shinR.rotation.x = THREE.MathUtils.lerp(1.0, 1.55, e);
+      n.torso.rotation.x = THREE.MathUtils.lerp(0.75, 0.55, e);
+      n.upperArmL.rotation.set(THREE.MathUtils.lerp(-0.45, -0.9, e),0,0.35);
+      n.upperArmR.rotation.set(THREE.MathUtils.lerp(-0.45, -0.9, e),0,-0.35);
+      n.forearmL.rotation.x = THREE.MathUtils.lerp(0.7, 1.0, e);
+      n.forearmR.rotation.x = THREE.MathUtils.lerp(0.7, 1.0, e);
+    }
   }
 
   // right arm holds the sword; left arm supports it
