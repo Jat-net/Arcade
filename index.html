@@ -612,7 +612,72 @@ oilGeo.setAttribute('position',new THREE.BufferAttribute(oilPos,3));
 const oilMat=new THREE.PointsMaterial({color:0x352817,size:0.11,transparent:true,opacity:0.95});
 const oilPoints=new THREE.Points(oilGeo,oilMat); oilPoints.frustumCulled=false; scene.add(oilPoints);
 let oilI=0;
-function oilSplash(p,n=10,power=2){n=Math.min(n*2,OILN);for(let i=0;i<n;i++){const j=(oilI=(oilI+1)%OILN)*3;oilPos[j]=p.x;oilPos[j+1]=p.y;oilPos[j+2]=p.z;const s=0.7+Math.random()*power;oilVel[j]=(Math.random()-.5)*s;oilVel[j+1]=Math.random()*s*0.75;oilVel[j+2]=(Math.random()-.5)*s;oilLife[oilI]=0.9+Math.random()*1.2;}}
+
+function oilSplash(pos, count = 40, power = 1) {
+  // Liquid oil: create a small amount of thick, glossy fluid that
+  // falls under gravity, spreads on impact, and remains as a puddle.
+  const drops = Math.max(8, Math.min(90, Math.floor(count * 0.45)));
+  const oilMat = new THREE.MeshStandardMaterial({
+    color: 0x11110d,
+    roughness: 0.18,
+    metalness: 0.05,
+    transparent: true,
+    opacity: 0.92
+  });
+
+  const gravity = -9.8;
+  const now = performance.now() * 0.001;
+
+  for (let i = 0; i < drops; i++) {
+    const radius = 0.018 + Math.random() * 0.035;
+    const g = new THREE.SphereGeometry(radius, 8, 6);
+    const mesh = new THREE.Mesh(g, oilMat.clone());
+
+    mesh.position.copy(pos);
+    mesh.position.x += (Math.random() - 0.5) * 0.16;
+    mesh.position.y += (Math.random() - 0.5) * 0.10;
+    mesh.position.z += (Math.random() - 0.5) * 0.16;
+
+    mesh.userData.oilLiquid = true;
+    mesh.userData.oilAge = 0;
+    mesh.userData.oilVelocity = new THREE.Vector3(
+      (Math.random() - 0.5) * power * 0.65,
+      0.8 + Math.random() * power * 0.9,
+      (Math.random() - 0.5) * power * 0.65
+    );
+    mesh.userData.oilRadius = radius;
+    mesh.userData.oilBorn = now;
+
+    scene.add(mesh);
+
+    // Keep these in the normal debris-style cleanup collection if present.
+    if (typeof debris !== 'undefined' && Array.isArray(debris)) {
+      debris.push(mesh);
+    }
+  }
+
+  // One glossy puddle immediately beneath the leak.
+  const puddleRadius = THREE.MathUtils.clamp(
+    0.16 + power * 0.045 + count * 0.002,
+    0.18,
+    0.7
+  );
+  const puddleG = new THREE.CircleGeometry(puddleRadius, 32);
+  const puddle = new THREE.Mesh(puddleG, oilMat.clone());
+  puddle.rotation.x = -Math.PI / 2;
+  puddle.position.set(pos.x, 0.018, pos.z);
+  puddle.scale.set(1, 0.72, 1);
+  puddle.userData.oilLiquid = true;
+  puddle.userData.oilAge = 0;
+  puddle.userData.oilPuddle = true;
+  puddle.userData.oilBorn = now;
+  scene.add(puddle);
+
+  if (typeof debris !== 'undefined' && Array.isArray(debris)) {
+    debris.push(puddle);
+  }
+}
+
 function stepOil(dt){for(let i=0;i<OILN;i++){if(oilLife[i]<=0){oilPos[i*3+1]=-50;continue;}oilLife[i]-=dt;oilVel[i*3+1]-=10*dt;oilPos[i*3]+=oilVel[i*3]*dt;oilPos[i*3+1]+=oilVel[i*3+1]*dt;oilPos[i*3+2]+=oilVel[i*3+2]*dt;if(oilPos[i*3+1]<0.03){oilPos[i*3+1]=0.03;oilVel[i*3]*=.25;oilVel[i*3+1]=0;oilVel[i*3+2]*=.25;}}oilGeo.attributes.position.needsUpdate=true;}
 let sparkI = 0;
 function burst(p, n, power, oil) {
