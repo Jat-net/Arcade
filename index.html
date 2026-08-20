@@ -727,7 +727,7 @@ const ROBOT_TYPES=[
 function chooseRobotType(wave){const pool=wave<2?ROBOT_TYPES.slice(0,2):ROBOT_TYPES;return pool[Math.floor(Math.random()*pool.length)];}
 function spawnRobot(x,z,wave){
   const tier=1+(wave-1)*.14,type=chooseRobotType(wave),rig=makeRig(MAT.bot,MAT.botHot);rig.root.scale.setScalar(type.scale);scene.add(rig.root);
-  const r={rig,type,parts:{},dead:false,hp:260*tier*type.hp,maxHp:260*tier*type.hp,pos:new THREE.Vector3(x,0,z),vel:new THREE.Vector3(),yaw:0,state:'approach',t:Math.random()*2,atk:0,phase:0,stagger:0,block:0,crippled:false,walk:Math.random()*6,bob:0,speed:type.speed+Math.min(1.8,wave*.08),aggr:Math.min(1,type.aggr+wave*.025),armor:Math.min(.68,type.armor+(wave-1)*.035),reach:WEAPONS[type.weapon].len+.55,hitFlag:0,power:type.power,weaponName:type.weapon,hasWeapon:true,swordDropped:false,damageDone:0,lastBegThreat:0,ko:false,koTimer:0,koRag:null,bruise:0,headBonk:0,neckReact:false,neckTimer:0,fistAttempts:0,fistHits:0,weaponPickupTarget:null,knock:new THREE.Vector3(),staggerMag:0,pose:{},poseTarget:{}};
+  const r={rig,type,parts:{},dead:false,hp:260*tier*type.hp,maxHp:260*tier*type.hp,pos:new THREE.Vector3(x,0,z),vel:new THREE.Vector3(),yaw:0,state:'approach',t:Math.random()*2,atk:0,phase:0,stagger:0,block:0,crippled:false,walk:Math.random()*6,bob:0,speed:type.speed+Math.min(1.8,wave*.08),aggr:Math.min(1,type.aggr+wave*.025),armor:Math.min(.68,type.armor+(wave-1)*.035),reach:WEAPONS[type.weapon].len+.55,hitFlag:0,power:type.power,weaponName:type.weapon,hasWeapon:true,swordDropped:false,damageDone:0,ko:false,koTimer:0,koRag:null,bruise:0,headBonk:0,neckReact:false,neckTimer:0,fistAttempts:0,fistHits:0,weaponPickupTarget:null,knock:new THREE.Vector3(),staggerMag:0,pose:{},poseTarget:{}};
   // one kinematic collider per bone, driven by the rig
   for (const name in BONE) {
     const b = BONE[name];
@@ -1450,7 +1450,7 @@ function driveSword(dt) {
 
 /* --------------------------------------------------------------- temporary KO */
 function startRobotKO(r, dir, duration=2.6){
-  if(r.dead||||r.ko)return;
+  if(r.dead||r.ko)return;
   r.ko=true; r.koTimer=duration; r.state='ko'; r.stagger=0; r.knock.set(0,0,0);
   const names=Object.keys(r.parts).filter(n=>!r.parts[n].severed);
   for(const nm in r.parts){const p=r.parts[nm]; if(p.armorMesh){p.armorMesh=null;}}
@@ -1677,7 +1677,7 @@ function bladeClash(r) {
 
 function botSwordHitsPlayer(r) {
   if (r.dead || player.hurtCd > 0) return;
-  if (r.state !== 'strike' || !r.hasWeapon || ) return;
+  if (r.state !== 'strike' || !r.hasWeapon) return;
   if (r.swordTipSpeed < 3.0) return;
   const facing=playerFacingRobot(r);
   const ambush = playerIsAttacking() && facing < 0.15;
@@ -1720,7 +1720,7 @@ function attackSlotFor(r, dist){
   return false;
 }
 function canStartAttack(r,dist){
-  if(||r.ko||r.dead||r.stagger>0||r.atk>0) return false;
+  if(r.ko||r.dead||r.stagger>0||r.atk>0) return false;
   if(!r.hasWeapon) return dist<1.7 && (playerIsVulnerable() || attackSlotFor(r,dist));
   return dist<r.reach*1.12 && attackSlotFor(r,dist);
 }
@@ -1734,8 +1734,6 @@ function stepAI(dt) {
     if (r.ko) { continue; }
     if (r.neckReact) { r.neckTimer -= dt; r.stagger=Math.max(r.stagger,0.5); if(r.neckTimer<=0){ r.neckReact=false; killRobot(r,new THREE.Vector3(0,-0.05,1),1.35); } continue; }
     r.headBonk=Math.max(0,r.headBonk-dt);
-    if (r.begCd > 0) r.begCd -= dt;
-    if (r.begHitTimer > 0) r.begHitTimer -= dt;
     for (const nm in r.parts) { const p = r.parts[nm]; if (p.hitCd > 0) p.hitCd -= dt; }
     r.clashCd = Math.max(0, (r.clashCd || 0) - dt);
     r.t += dt;
@@ -1757,7 +1755,7 @@ function stepAI(dt) {
       let bestP=null,bestD=99; for(const p of pickups){if(!p.weaponDrop||!WEAPONS[p.kind])continue;const d=Math.hypot(p.mesh.position.x-r.pos.x,p.mesh.position.z-r.pos.z);if(d<bestD&&(!p.owner||p.owner===r||p.owner.dead)){bestD=d;bestP=p;}}
       if(bestP)r.weaponPickupTarget=bestP;
     }
-    if(r.stagger>0&&)r.state='stagger'; else if(r.state==='stagger'){r.state='approach';r.phase=0;}
+    if(r.stagger>0)r.state='stagger'; else if(r.state==='stagger'){r.state='approach';r.phase=0;}
     let move=0,strafe=0;
     switch(r.state){
       case 'stagger': break;
@@ -1808,35 +1806,40 @@ function stepAI(dt) {
 
     // --- arm pose targets per state (sword stays in hand, always) -----
     const T = r.poseTarget;
+    if (r.state === 'windup') {
+      const k = r.phase / ATK.windup;
+      if(!r.hasWeapon){ T.shR = -1.05; T.elR = -0.75; T.shL = -0.85; T.elL = -0.7; T.spine = -0.08*k; }
+      else {
+        T.shR = -1.55; T.elR = -1.25; T.shL = -1.35; T.elL = -1.05;
+        T.spine = -0.12 * k;
+        T.attackSide = r.attackStyle === 'left' ? -1 : 1;
+      }
       T.headY = 0;
-    } else if (&&r.state === 'strike') {
+    } else if (r.state === 'strike') {
       const k = r.phase / ATK.strike;
       const side = r.attackStyle === 'left' ? -1 : 1;
       if(!r.hasWeapon){ T.shR = 0.05 - k*0.25; T.elR = -0.05 - k*0.2; T.shL = -0.1 + k*0.25; T.elL = -0.2 + k*0.2; T.spine = -0.04 + k*0.08; }
       else {
-        // Horizontal left-to-right / right-to-left cut: shoulder roll provides
-        // the lateral sweep while the elbow opens through the contact window.
         T.shR = -1.25 + side * 2.05 * k;
         T.elR = -1.15 + 0.85 * k;
         T.shL = -1.15 - side * 0.65 * k;
         T.elL = -1.0 + 0.45 * k;
         T.spine = 0.04 + side * 0.18 * k;
       }
-    } else if (&&r.state === 'stagger') {
+    } else if (r.state === 'stagger') {
       const m = r.staggerMag;
       T.shR = -0.7 - m * 0.5; T.elR = -0.7 - m * 0.3; T.spine = 0.25 + m * 0.55;
       T.shL = -0.4 - m * 0.5; T.elL = -0.5 - m * 0.3; T.headY = -0.2 - m * 0.5;
-    } else if (&&r.block > 0) {
+    } else if (r.block > 0) {
       T.shR = -1.9; T.elR = -1.9; T.spine = 0.1; T.shL = -1.6; T.elL = -1.5;
-    } else if () {
-      // guard: blade up and forward, both hands near the hilt
+    } else {
       T.shR = -1.55; T.elR = -1.25; T.spine = 0.05;
       T.shL = -1.35; T.elL = -1.35; T.headY = 0;
     }
 
     // Coordinated attacks: most robots wait. One commits after the player's
     // swing has finished; a second can occasionally ambush from the side/back.
-    if(&&(r.state==='approach'||r.state==='circle')&&canStartAttack(r,dist)){
+    if((r.state==='approach'||r.state==='circle')&&canStartAttack(r,dist)){
       const facing=playerFacingRobot(r);
       const ambush = playerIsAttacking() && facing < 0.15;
       const chance = ambush ? 0.22 : 0.62;
