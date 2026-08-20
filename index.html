@@ -35,6 +35,10 @@
   #marks i { position:absolute; width:0; height:0; border-left:9px solid transparent; border-right:9px solid transparent; border-bottom:15px solid #ff7a2f; opacity:0.85; }
   #toast { position:absolute; left:50%; top:14%; transform:translateX(-50%); color:var(--amber); letter-spacing:2px; font-size:17px; opacity:0; transition:opacity .25s; text-shadow:0 0 12px #000; }
   #prompt { position:absolute; left:50%; bottom:22%; transform:translateX(-50%); color:#e8e2d6; background:#121114dd; border:1px solid #4a4238; padding:8px 14px; letter-spacing:1px; opacity:0; transition:opacity .15s; }
+  #mercyPopup{position:fixed;left:50%;top:27%;transform:translateX(-50%);z-index:45;display:none;min-width:330px;padding:16px 22px;border:2px solid #d8a84e;border-radius:12px;background:rgba(10,11,13,.93);color:#eee;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.55);letter-spacing:.5px}
+  #mercyPopup b{display:block;color:#ffd36b;font-size:17px;letter-spacing:2px;margin-bottom:7px}
+  #mercyPopup span{font-size:13px}
+  #mercyPopup strong{color:#fff;font-size:16px}
   #err { position:fixed; inset:0; display:none; place-items:center; background:#0b0c0e; z-index:9; padding:30px; text-align:center; }
 </style>
 </head>
@@ -46,6 +50,7 @@
   <div id="marks"></div>
   <div id="toast"></div>
   <div id="prompt"></div>
+  <div id="mercyPopup"><b>EVERY ROBOT IS BEGGING</b><span>Press <strong>T</strong> to spare them — or keep fighting.</span></div>
   <div id="stats">WAVE <b id="wave">1</b> &nbsp; KILLS <b id="kills">0</b> &nbsp; ARMOR <b id="armor">0%</b> &nbsp; BEST <b id="best">0</b></div>
 </div>
 
@@ -77,6 +82,7 @@
   <p><button id="againBtn">RESTART</button></p>
 </div></div>
 
+<style></style>
 <div id="err"><div><h2>Cannot load engine</h2><p id="errmsg">Three.js / Rapier could not be fetched from the CDN. This file needs a network connection the first time it runs.</p></div></div>
 
 <script type="module">
@@ -727,7 +733,7 @@ const ROBOT_TYPES=[
 function chooseRobotType(wave){const pool=wave<2?ROBOT_TYPES.slice(0,2):ROBOT_TYPES;return pool[Math.floor(Math.random()*pool.length)];}
 function spawnRobot(x,z,wave){
   const tier=1+(wave-1)*.14,type=chooseRobotType(wave),rig=makeRig(MAT.bot,MAT.botHot);rig.root.scale.setScalar(type.scale);scene.add(rig.root);
-  const r={rig,type,parts:{},dead:false,hp:260*tier*type.hp,maxHp:260*tier*type.hp,pos:new THREE.Vector3(x,0,z),vel:new THREE.Vector3(),yaw:0,state:'approach',t:Math.random()*2,atk:0,phase:0,stagger:0,block:0,crippled:false,walk:Math.random()*6,bob:0,speed:type.speed+Math.min(1.8,wave*.08),aggr:Math.min(1,type.aggr+wave*.025),armor:Math.min(.68,type.armor+(wave-1)*.035),reach:WEAPONS[type.weapon].len+.55,hitFlag:0,power:type.power,weaponName:type.weapon,hasWeapon:true,swordDropped:false,damageDone:0,ko:false,koTimer:0,koRag:null,bruise:0,headBonk:0,neckReact:false,neckTimer:0,fistAttempts:0,fistHits:0,weaponPickupTarget:null,knock:new THREE.Vector3(),staggerMag:0,pose:{},poseTarget:{}};
+  const r={rig,type,parts:{},dead:false,hp:260*tier*type.hp,maxHp:260*tier*type.hp,pos:new THREE.Vector3(x,0,z),vel:new THREE.Vector3(),yaw:0,state:'approach',t:Math.random()*2,atk:0,phase:0,stagger:0,block:0,crippled:false,walk:Math.random()*6,bob:0,speed:type.speed+Math.min(1.8,wave*.08),aggr:Math.min(1,type.aggr+wave*.025),armor:Math.min(.68,type.armor+(wave-1)*.035),reach:WEAPONS[type.weapon].len+.55,hitFlag:0,power:type.power,weaponName:type.weapon,hasWeapon:true,swordDropped:false,surrender:false,surrenderStage:'fall',surrenderHit:0,fallSide:(Math.random()<0.5?-1:1),flee:false,mercyHit:false,begCd:0,begHitTimer:0,begLine:'',begBubble:null,voiceIndex:0,voiceKey:Math.floor(Math.random()*1000000),damageDone:0,lastBegThreat:0,ko:false,koTimer:0,koRag:null,bruise:0,headBonk:0,neckReact:false,neckTimer:0,fistAttempts:0,fistHits:0,weaponPickupTarget:null,knock:new THREE.Vector3(),staggerMag:0,pose:{},poseTarget:{}};
   // one kinematic collider per bone, driven by the rig
   for (const name in BONE) {
     const b = BONE[name];
@@ -842,6 +848,49 @@ function poseRobot(r, dt) {
   n.shinR.rotation.set(Math.max(0, gait) * 0.9 + 0.08, 0, 0);
   n.footL.rotation.set(-gait * 0.25, 0, 0);
   n.footR.rotation.set(gait * 0.25, 0, 0);
+  if (r.surrender) {
+    // Surrender is deliberately not a teleport-to-knees. It has three readable
+    // beats: collapse, recover, then kneel and beg.
+    const fall = clamp(r.phase / 0.58, 0, 1);
+    const recover = clamp((r.phase - 0.48) / 0.55, 0, 1);
+    const kneel = clamp((r.phase - 0.88) / 0.72, 0, 1);
+    const fallEase = fall * fall * (3 - 2 * fall);
+    const recoverEase = recover * recover * (3 - 2 * recover);
+    const kneelEase = kneel * kneel * (3 - 2 * kneel);
+    const hitFlinch = r.begHitTimer > 0 ? Math.sin((r.begHitTimer/0.65)*Math.PI) : 0;
+
+    // Collapse sideways/forward onto the ground first.
+    n.pelvis.position.y = THREE.MathUtils.lerp(0.95, 0.34, fallEase);
+    n.pelvis.rotation.z = THREE.MathUtils.lerp(0, 1.05, fallEase) * (r.fallSide || 1);
+    n.pelvis.rotation.x = THREE.MathUtils.lerp(0.03, 1.05, fallEase);
+    n.torso.rotation.x = THREE.MathUtils.lerp(0.06, 1.35, fallEase) + hitFlinch*0.45;
+    n.thighL.rotation.x = THREE.MathUtils.lerp(-0.05, 0.45, fallEase);
+    n.thighR.rotation.x = THREE.MathUtils.lerp(-0.05, 0.45, fallEase);
+    n.shinL.rotation.x = THREE.MathUtils.lerp(0.08, 0.65, fallEase);
+    n.shinR.rotation.x = THREE.MathUtils.lerp(0.08, 0.65, fallEase);
+    n.upperArmL.rotation.set(THREE.MathUtils.lerp(P.shL, 1.0, fallEase),0,0.55);
+    n.upperArmR.rotation.set(THREE.MathUtils.lerp(P.shR, 1.0, fallEase),0,-0.55);
+    n.forearmL.rotation.x = THREE.MathUtils.lerp(P.elL, 0.8, fallEase);
+    n.forearmR.rotation.x = THREE.MathUtils.lerp(P.elR, 0.8, fallEase);
+
+    // Roll/push back toward upright after hitting the ground.
+    n.pelvis.rotation.z = THREE.MathUtils.lerp(n.pelvis.rotation.z, 0.18*(r.fallSide||1), recoverEase);
+    n.pelvis.rotation.x = THREE.MathUtils.lerp(n.pelvis.rotation.x, 0.65, recoverEase);
+
+    // Finally settle onto both knees with raised hands.
+    n.pelvis.position.y = THREE.MathUtils.lerp(n.pelvis.position.y, 0.72, kneelEase);
+    n.pelvis.rotation.x = THREE.MathUtils.lerp(n.pelvis.rotation.x, 0.95, kneelEase);
+    n.pelvis.rotation.z = THREE.MathUtils.lerp(n.pelvis.rotation.z, 0, kneelEase);
+    n.thighL.rotation.x = THREE.MathUtils.lerp(n.thighL.rotation.x, -1.05, kneelEase);
+    n.thighR.rotation.x = THREE.MathUtils.lerp(n.thighR.rotation.x, -1.05, kneelEase);
+    n.shinL.rotation.x = THREE.MathUtils.lerp(n.shinL.rotation.x, 1.55, kneelEase);
+    n.shinR.rotation.x = THREE.MathUtils.lerp(n.shinR.rotation.x, 1.55, kneelEase);
+    n.torso.rotation.x = THREE.MathUtils.lerp(n.torso.rotation.x, 0.55, kneelEase);
+    n.upperArmL.rotation.set(THREE.MathUtils.lerp(n.upperArmL.rotation.x,-0.9,kneelEase),0,0.35);
+    n.upperArmR.rotation.set(THREE.MathUtils.lerp(n.upperArmR.rotation.x,-0.9,kneelEase),0,-0.35);
+    n.forearmL.rotation.x = THREE.MathUtils.lerp(n.forearmL.rotation.x,1.0,kneelEase);
+    n.forearmR.rotation.x = THREE.MathUtils.lerp(n.forearmR.rotation.x,1.0,kneelEase);
+  }
 
   // right arm holds the sword; left arm supports it
   n.upperArmR.rotation.set(P.shR, 0, -0.28 - P.elR * 0.15);
@@ -1248,6 +1297,7 @@ function sever(part, dirHint, cutT) {
 
   if (part.name === 'thighL' || part.name === 'thighR' || part.name === 'shinL' || part.name === 'shinR') r.crippled = true;
   if (part.name === 'handR' || part.name === 'forearmR' || part.name === 'upperArmR') dropBotSword(r);
+  if (armsDisabled(r) && !r.dead) beginSurrender(r);
   burst(hitPos, 26, 4, false);
   burst(hitPos.clone(), 10, 1, true);
   clank(7, true);
@@ -1255,10 +1305,11 @@ function sever(part, dirHint, cutT) {
 }
 
 function dropBotSword(r){if(!r.swordBody||r.swordDropped)return;r.swordDropped=true;r.hasWeapon=false;dropBody(r.swordBody,r.swordCol);r.swordBody=null;r.reach=1.55;if(!r.swordMesh)return;const pos=r.swordMesh.position.clone(),kind=r.weaponName;scene.remove(r.swordMesh);r.swordMesh=null;const p=makePickup(pos.x,pos.z,kind,{y:.22,weaponDrop:true,owner:r,life:90});p.mesh.rotation.set(0,r.yaw,.55);r.weaponPickupTarget=p;}
-function equipRobotWeapon(r,p){if(r.dead||r.hasWeapon||!p||!pickups.includes(p))return false;const c=WEAPONS[p.kind];if(!c)return false;r.weaponName=p.kind;r.swordCfg=c;r.hasWeapon=true;r.reach=c.len+.55;r.swordDropped=false;r.weaponPickupTarget=null;scene.remove(p.mesh);pickups.splice(pickups.indexOf(p),1);r.swordMesh=buildBladeMesh(c);scene.add(r.swordMesh);const sd=RAPIER.RigidBodyDesc.dynamic().setGravityScale(0).setLinearDamping(1.8).setAngularDamping(2.4).setCcdEnabled(true);r.swordBody=world.createRigidBody(sd);r.swordCol=world.createCollider(RAPIER.ColliderDesc.cuboid(c.th,c.w,c.len/2).setDensity(c.density/900).setRestitution(.08).setFriction(.35).setCollisionGroups(GRP_SWORD_BOT).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),r.swordBody);tag(r.swordCol,{k:'botsword',robot:r});r.swordPrevTip=new THREE.Vector3();r.swordTipSpeed=0;r.swordPhysicsReady=false;r.swordTargetPos=new THREE.Vector3();r.swordTargetQuat=new THREE.Quaternion();return true;}
+function equipRobotWeapon(r,p){if(r.dead||r.surrender||r.hasWeapon||!p||!pickups.includes(p))return false;const c=WEAPONS[p.kind];if(!c)return false;r.weaponName=p.kind;r.swordCfg=c;r.hasWeapon=true;r.reach=c.len+.55;r.swordDropped=false;r.weaponPickupTarget=null;scene.remove(p.mesh);pickups.splice(pickups.indexOf(p),1);r.swordMesh=buildBladeMesh(c);scene.add(r.swordMesh);const sd=RAPIER.RigidBodyDesc.dynamic().setGravityScale(0).setLinearDamping(1.8).setAngularDamping(2.4).setCcdEnabled(true);r.swordBody=world.createRigidBody(sd);r.swordCol=world.createCollider(RAPIER.ColliderDesc.cuboid(c.th,c.w,c.len/2).setDensity(c.density/900).setRestitution(.08).setFriction(.35).setCollisionGroups(GRP_SWORD_BOT).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),r.swordBody);tag(r.swordCol,{k:'botsword',robot:r});r.swordPrevTip=new THREE.Vector3();r.swordTipSpeed=0;r.swordPhysicsReady=false;r.swordTargetPos=new THREE.Vector3();r.swordTargetQuat=new THREE.Quaternion();return true;}
 function killRobot(r, dirHint, forceMag) {
   if (r.dead) return;
   r.dead = true; S.kills++;
+  if(r.begBubble){r.begBubble.remove();r.begBubble=null;}
   dropBotSword(r);
   forceMag = forceMag || 1;
   // Death is a genuine ragdoll: every remaining bone becomes a jointed dynamic
@@ -1325,7 +1376,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyZ') sword.edge -= 0.25;
   if (e.code === 'KeyX') sword.edge += 0.25;
   if (e.code === 'KeyE') mouse.pickup = true;
-  if (['Space','KeyC','KeyQ','KeyR','Tab','KeyE','KeyT'].includes(e.code)) e.preventDefault();
+if (['Space','KeyC','KeyQ','KeyR','Tab','KeyE','KeyT'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e => { keys.delete(e.code); if (e.code === 'KeyE') mouse.pickup = false; });
 addEventListener('mousemove', e => {
@@ -1450,7 +1501,7 @@ function driveSword(dt) {
 
 /* --------------------------------------------------------------- temporary KO */
 function startRobotKO(r, dir, duration=2.6){
-  if(r.dead||r.ko)return;
+  if(r.dead||r.surrender||r.flee||r.ko)return;
   r.ko=true; r.koTimer=duration; r.state='ko'; r.stagger=0; r.knock.set(0,0,0);
   const names=Object.keys(r.parts).filter(n=>!r.parts[n].severed);
   for(const nm in r.parts){const p=r.parts[nm]; if(p.armorMesh){p.armorMesh=null;}}
@@ -1538,6 +1589,17 @@ function swordHit(part) {
   const massK = sword.cfg.density * sword.cfg.len / 1100;
   let dmg = speed * speed * 0.17 * massK * sword.cfg.dmg * S.mods.dmg * (0.18 + 0.82 * edgeAlign);
   const r = part.robot;
+  if (r.surrender) {
+    r.mercyHit=true;
+    r.begLine='I know... I know my time is up! ASG, please!';
+    r.begCd=0;
+    r.stagger=Math.max(r.stagger,.9);
+    r.staggerMag=Math.max(r.staggerMag,.85);
+    r.begHitTimer=0.65;
+    robotBeg(r,true);
+    // Do NOT return: a surrendered robot can still physically be hit.
+    // It recoils, reacts, and the same weapon rules resolve the impact.
+  }
   dmg *= (1 - r.armor) * (r.block > 0 ? 0.35 : 1);
   if (part.broken) dmg *= 1.6;      // a cracked bone gives way easily
   if (part.name === 'head' || part.name === 'neck') dmg *= 1.5;
@@ -1677,7 +1739,7 @@ function bladeClash(r) {
 
 function botSwordHitsPlayer(r) {
   if (r.dead || player.hurtCd > 0) return;
-  if (r.state !== 'strike' || !r.hasWeapon) return;
+  if (r.state !== 'strike' || !r.hasWeapon || r.surrender || r.flee) return;
   if (r.swordTipSpeed < 3.0) return;
   const facing=playerFacingRobot(r);
   const ambush = playerIsAttacking() && facing < 0.15;
@@ -1695,6 +1757,64 @@ function botSwordHitsPlayer(r) {
 }
 
 function armsDisabled(r){const bad=n=>!r.parts[n]||r.parts[n].severed;return (bad('handL')||bad('forearmL')||bad('upperArmL'))&&(bad('handR')||bad('forearmR')||bad('upperArmR'));}
+function robotBeg(r, urgent=false){
+  if(r.dead||!r.surrender)return;
+  const d=Math.hypot(player.body.translation().x-r.pos.x,player.body.translation().z-r.pos.z);
+  const badlyHurt=(r.damageDone>8);
+  const swordThreat = (sword.tipVel.length()>5.0 || (mouse.grip && sword.cfg.kind!=='mace')) && Math.hypot(sword.tip.x-r.pos.x,sword.tip.z-r.pos.z)<4.6;
+  const close = d < 2.6;
+  const veryClose = d < 1.55;
+  const frantic = urgent || swordThreat || veryClose;
+  const lines=badlyHurt ? {
+    DUELIST:['I am sorry! I should not have hurt you!','Please forgive me! I was wrong!','I apologize! Please spare me!'],
+    BRUISER:['I am sorry! Please spare me!','Forgive me! I will not fight again!','I should have stopped!'],
+    SCOUT:['I am sorry! Please!','I made a mistake! Please spare me!','I should never have attacked you!'],
+    LANCER:['I am sorry! I surrender!','Please spare my frame!','I will not attack again!'],
+    CLEAVER:['I apologize! Please spare me!','I was wrong! Let me go!','Mercy! I surrender!']
+  } : {
+    DUELIST:['I never harmed you! Please!','Wait! I never hurt you!','Please! I surrender!'],
+    BRUISER:['I never harmed you! Mercy!','Please! I have not hurt you!','Wait! I surrender!'],
+    SCOUT:['I never hurt you! Please!','Wait! Mercy!','I do not want to fight!'],
+    LANCER:['I never hurt you! Please!','I surrender! I never harmed you!','Please let me leave!'],
+    CLEAVER:['I never harmed you! Mercy!','Please! I surrender!','I do not want trouble!']
+  };
+  for(const key of Object.keys(lines)){ lines[key] = lines[key].concat(['ASG save me!','Oh ASG, please!','ASG, do not let me fall!','Please, ASG, I surrender!','ASG save this machine!','By ASG, I beg you!']); }
+  const pool=lines[r.type.name]||lines.DUELIST;
+  const franticPool = veryClose ? [
+    'Oh ASG! Oh ASG! Please! Don’t hurt me!','ASG, please! Please! I know my time is up!',
+    'No! No! ASG save me! Please, please!','Oh ASG, no! Please! I know what is coming!',
+    'Please! Please! Don’t! I surrender!','ASG! I beg you! Please don’t hurt me!'
+  ] : [
+    'Oh ASG! Please!','ASG save me! Please!','Oh ASG, no! Please don’t hurt me!',
+    'Please! I know my time is up!','ASG, please! I am begging you!'
+  ];
+  if(r.begLine && !frantic && r.begCd>0)return;
+  r.begLine=(frantic ? franticPool : pool)[Math.floor(Math.random()*(frantic?franticPool.length:pool.length))];
+  r.begCd=frantic?0.45:2.3;
+  // Speech synthesis intentionally removed; the robot communicates through animation + text bubble.
+  if(r.begBubble){r.begBubble.remove();r.begBubble=null;}
+  const b=document.createElement('div');
+  b.className='beg-bubble';
+  const safe = String(r.begLine).replace(/<[^>]*>/g,'');
+  const parts = safe.split(/\bASG\b/g);
+  let html='<span class="beg-name">'+r.type.name+'</span>';
+  for(let i=0;i<parts.length;i++){ html += parts[i]; if(i<parts.length-1) html += '<span class="asg">ASG</span>'; }
+  b.innerHTML=html;
+  document.body.appendChild(b);r.begBubble=b;
+}
+function beginSurrender(r){
+  if(r.dead||r.surrender||r.flee)return;
+  r.surrender=true; r.state='surrender'; r.phase=0; r.surrenderStage='fall'; r.surrenderHit=0;
+  // Keep the robot physically responsive for the brief collapse: the surrender
+  // animation starts with a knocked-down motion, then transitions into kneeling.
+  r.vel.set(0,0,0); r.knock.set(0,0,0);
+  r.begCd=0; r.begLine='';
+  toast('ROBOT '+r.type.name+' IS BEGGING FOR MERCY');
+  robotBeg(r);
+}
+function allRemainingSurrendered(){const alive=robots.filter(r=>!r.dead);return alive.length>0&&alive.every(r=>r.surrender);}
+function spareAll(){if(!allRemainingSurrendered())return;for(const r of robots){if(!r.dead){r.flee=true;r.surrender=false;r.state='flee';r.phase=0;}}setPrompt(''); $('mercyPopup').style.display='none'; toast('MERCY GRANTED — THEY RUN');}
+function updateMercyPopup(){const el=$('mercyPopup'); if(!el)return; const show=allRemainingSurrendered(); el.style.display=show?'block':'none';}
 /* -------------------------------------------------------------------- AI */
 const ATK = { windup:0.48, strike:0.30, recover:0.62 };
 function playerIsAttacking(){ return sword.tipVel.length() > 4.2 || sword.thrust > 0.18; }
@@ -1705,7 +1825,7 @@ function playerFacingRobot(r){
   return f.dot(new THREE.Vector3(dx/d,0,dz/d));
 }
 function attackSlotFor(r, dist){
-  const living=robots.filter(o=>!o.dead&&!o.ko);
+  const living=robots.filter(o=>!o.dead&&!o.surrender&&!o.flee&&!o.ko);
   const attackers=living.filter(o=>o.state==='windup'||o.state==='strike');
   if(attackers.length===0) return playerIsVulnerable();
   // Let one robot be the main attacker. A second robot may ambush from the side/back
@@ -1720,7 +1840,7 @@ function attackSlotFor(r, dist){
   return false;
 }
 function canStartAttack(r,dist){
-  if(r.ko||r.dead||r.stagger>0||r.atk>0) return false;
+  if(r.surrender||r.flee||r.ko||r.dead||r.stagger>0||r.atk>0) return false;
   if(!r.hasWeapon) return dist<1.7 && (playerIsVulnerable() || attackSlotFor(r,dist));
   return dist<r.reach*1.12 && attackSlotFor(r,dist);
 }
@@ -1731,9 +1851,16 @@ function stepAI(dt) {
     // dead robots are pure debris now — drop them so the list can't grow
     // without bound across waves (that leak used to tank the framerate).
     if (r.dead) { if (lockTarget !== r) robots.splice(ri, 1); continue; }
-    if (r.ko) { continue; }
+    if (r.ko) { r.begCd=Math.max(0,r.begCd-dt); continue; }
     if (r.neckReact) { r.neckTimer -= dt; r.stagger=Math.max(r.stagger,0.5); if(r.neckTimer<=0){ r.neckReact=false; killRobot(r,new THREE.Vector3(0,-0.05,1),1.35); } continue; }
     r.headBonk=Math.max(0,r.headBonk-dt);
+    if (r.begCd > 0) r.begCd -= dt;
+    if (r.begHitTimer > 0) r.begHitTimer -= dt;
+    if (r.surrender) {
+      const tip=sword.tipVel.length();
+      const threat=Math.hypot(sword.tip.x-r.pos.x,sword.tip.z-r.pos.z);
+      robotBeg(r, threat<2.8 && tip>6);
+    }
     for (const nm in r.parts) { const p = r.parts[nm]; if (p.hitCd > 0) p.hitCd -= dt; }
     r.clashCd = Math.max(0, (r.clashCd || 0) - dt);
     r.t += dt;
@@ -1751,13 +1878,15 @@ function stepAI(dt) {
     r.yaw += clamp(diff, -3.2 * dt, 3.2 * dt);
 
     // --- state machine -----------------------------------------------
-    if (r.swordDropped && !r.hasWeapon && !armsDisabled(r)) {
+    if (!r.surrender && r.swordDropped && !r.hasWeapon && !armsDisabled(r)) {
       let bestP=null,bestD=99; for(const p of pickups){if(!p.weaponDrop||!WEAPONS[p.kind])continue;const d=Math.hypot(p.mesh.position.x-r.pos.x,p.mesh.position.z-r.pos.z);if(d<bestD&&(!p.owner||p.owner===r||p.owner.dead)){bestD=d;bestP=p;}}
       if(bestP)r.weaponPickupTarget=bestP;
     }
-    if(r.stagger>0)r.state='stagger'; else if(r.state==='stagger'){r.state='approach';r.phase=0;}
+    if(r.stagger>0&&!r.surrender&&!r.flee)r.state='stagger'; else if(r.state==='stagger'){r.state='approach';r.phase=0;}
     let move=0,strafe=0;
     switch(r.state){
+      case 'surrender': r.phase=Math.min(2.0,r.phase+dt); break;
+      case 'flee': move=1; break;
       case 'stagger': break;
       case 'approach':
         if(r.weaponPickupTarget&&!r.hasWeapon){const wp=r.weaponPickupTarget,wx=wp.mesh.position.x-r.pos.x,wz=wp.mesh.position.z-r.pos.z,wd=Math.hypot(wx,wz)||1;if(wd<.85)equipRobotWeapon(r,wp);else move=1;break;}
@@ -1806,10 +1935,15 @@ function stepAI(dt) {
 
     // --- arm pose targets per state (sword stays in hand, always) -----
     const T = r.poseTarget;
+    if (r.surrender) { const k=Math.min(1,r.phase/0.9); T.shR=-0.25; T.elR=0.75; T.shL=-0.25; T.elL=0.75; T.spine=0.75*k; T.headY=0.15; T.hipL=0.9*k; T.hipR=0.9*k; T.kneeL=-1.35*k; T.kneeR=-1.35*k; }
+    else if (r.flee) { T.shR=-0.9; T.elR=-0.6; T.shL=-0.9; T.elL=-0.6; T.spine=-0.05; }
     if (r.state === 'windup') {
       const k = r.phase / ATK.windup;
       if(!r.hasWeapon){ T.shR = -1.05; T.elR = -0.75; T.shL = -0.85; T.elL = -0.7; T.spine = -0.08*k; }
       else {
+        // Draw the weapon to one side and behind the shoulder. The actual strike
+        // travels horizontally across the player's line, rather than chopping
+        // from overhead.
         T.shR = -1.55; T.elR = -1.25; T.shL = -1.35; T.elL = -1.05;
         T.spine = -0.12 * k;
         T.attackSide = r.attackStyle === 'left' ? -1 : 1;
@@ -1820,6 +1954,8 @@ function stepAI(dt) {
       const side = r.attackStyle === 'left' ? -1 : 1;
       if(!r.hasWeapon){ T.shR = 0.05 - k*0.25; T.elR = -0.05 - k*0.2; T.shL = -0.1 + k*0.25; T.elL = -0.2 + k*0.2; T.spine = -0.04 + k*0.08; }
       else {
+        // Horizontal left-to-right / right-to-left cut: shoulder roll provides
+        // the lateral sweep while the elbow opens through the contact window.
         T.shR = -1.25 + side * 2.05 * k;
         T.elR = -1.15 + 0.85 * k;
         T.shL = -1.15 - side * 0.65 * k;
@@ -1833,6 +1969,7 @@ function stepAI(dt) {
     } else if (r.block > 0) {
       T.shR = -1.9; T.elR = -1.9; T.spine = 0.1; T.shL = -1.6; T.elL = -1.5;
     } else {
+      // guard: blade up and forward, both hands near the hilt
       T.shR = -1.55; T.elR = -1.25; T.spine = 0.05;
       T.shL = -1.35; T.elL = -1.35; T.headY = 0;
     }
@@ -2017,7 +2154,7 @@ function stepWaves(dt) {
     }
     return;
   }
-  const remaining=robots.filter(r=>!r.dead); if(remaining.length===0){waveActive=false;waveGap=3.0;}
+  const remaining=robots.filter(r=>!r.dead); if(remaining.length===0){waveActive=false;waveGap=3.0;} else if(allRemainingSurrendered()){setPrompt('ALL ROBOTS ARE BEGGING — PRESS T TO SPARE THEM'); updateMercyPopup();} else updateMercyPopup();
 }
 
 function clearDebris() {
@@ -2056,7 +2193,7 @@ function togglePause() {
 function reset() {
   clearDebris();
   clearPickups();
-S.wave = 1; S.kills = 0; S.over = false; waveGap = 0; S.armorPlates = 0;
+  $('mercyPopup').style.display='none'; S.wave = 1; S.kills = 0; S.over = false; waveGap = 0; S.armorPlates = 0;
   updateHeroArmor();
   S.mods = { dmg:1, swingSpeed:1, armor:0, balance:1, recovery:1, maxHp:100 };
   buildSword('longsword');
@@ -2098,7 +2235,7 @@ function updateLock(dt) {
   if (dCycleCooldown > 0) dCycleCooldown -= dt;
   if (keys.has('KeyD')) dHold += dt; else dHold = 0;
   if (dHold > 0.48 && dCycleCooldown <= 0 && lockTarget) {
-    const candidates=robots.filter(r=>!r.dead && !r.ko && r!==lockTarget && Math.hypot(r.pos.x-pt.x,r.pos.z-pt.z)<LOCK_RANGE);
+    const candidates=robots.filter(r=>!r.dead && !r.surrender && !r.ko && r!==lockTarget && Math.hypot(r.pos.x-pt.x,r.pos.z-pt.z)<LOCK_RANGE);
     if (candidates.length) {
       candidates.sort((a,b)=>Math.atan2(a.pos.x-pt.x,a.pos.z-pt.z)-Math.atan2(b.pos.x-pt.x,b.pos.z-pt.z));
       let next=candidates.find(r=>r.pos.x*0+r.pos.z*0===0); // deterministic first after current in angle order
@@ -2118,7 +2255,7 @@ function updateLock(dt) {
   }
   let best = null, bestD = LOCK_RANGE;
   for (const r of robots) {
-    if (r.dead || r.ko) continue;
+    if (r.dead || r.surrender || r.ko) continue;
     const d = Math.hypot(r.pos.x - pt.x, r.pos.z - pt.z);
     if (d < bestD) { bestD = d; best = r; }
   }
@@ -2278,6 +2415,8 @@ function updateMarks() {
 }
 
 const CAM = { dist: 4.08, height: 1.62, tilt: 0.24 };
+const camFocus = new THREE.Vector3(0, 1.9, 8);
+const camQ2 = new THREE.Quaternion(), _v3 = new THREE.Vector3();
 
 let acc = 0, last = performance.now();
 function frame(now) {
