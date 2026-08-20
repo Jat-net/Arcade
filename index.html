@@ -612,12 +612,13 @@ oilGeo.setAttribute('position',new THREE.BufferAttribute(oilPos,3));
 const oilMat=new THREE.PointsMaterial({color:0x352817,size:0.11,transparent:true,opacity:0.95});
 const oilPoints=new THREE.Points(oilGeo,oilMat); oilPoints.frustumCulled=false; scene.add(oilPoints);
 let oilI=0;
+const oilLiquids = [];
 
 function oilSplash(pos, count = 40, power = 1) {
-  // Liquid oil: create a small amount of thick, glossy fluid that
-  // falls under gravity, spreads on impact, and remains as a puddle.
-  const drops = Math.max(8, Math.min(90, Math.floor(count * 0.45)));
-  const oilMat = new THREE.MeshStandardMaterial({
+  // Glossy liquid oil. Oil objects live in their own collection so they
+  // never enter the rigid-body debris update loop.
+  const drops = Math.max(8, Math.min(45, Math.floor(count * 0.22)));
+  const oilMaterial = new THREE.MeshStandardMaterial({
     color: 0x11110d,
     roughness: 0.18,
     metalness: 0.05,
@@ -625,13 +626,12 @@ function oilSplash(pos, count = 40, power = 1) {
     opacity: 0.92
   });
 
-  const gravity = -9.8;
-  const now = performance.now() * 0.001;
-
   for (let i = 0; i < drops; i++) {
     const radius = 0.018 + Math.random() * 0.035;
-    const g = new THREE.SphereGeometry(radius, 8, 6);
-    const mesh = new THREE.Mesh(g, oilMat.clone());
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(radius, 8, 6),
+      oilMaterial.clone()
+    );
 
     mesh.position.copy(pos);
     mesh.position.x += (Math.random() - 0.5) * 0.16;
@@ -646,35 +646,94 @@ function oilSplash(pos, count = 40, power = 1) {
       (Math.random() - 0.5) * power * 0.65
     );
     mesh.userData.oilRadius = radius;
-    mesh.userData.oilBorn = now;
 
     scene.add(mesh);
-
-    // Keep these in the normal debris-style cleanup collection if present.
-    if (typeof debris !== 'undefined' && Array.isArray(debris)) {
-      debris.push(mesh);
-    }
+    oilLiquids.push(mesh);
   }
 
-  // One glossy puddle immediately beneath the leak.
+  // A single puddle underneath the leak.
   const puddleRadius = THREE.MathUtils.clamp(
     0.16 + power * 0.045 + count * 0.002,
     0.18,
     0.7
   );
-  const puddleG = new THREE.CircleGeometry(puddleRadius, 32);
-  const puddle = new THREE.Mesh(puddleG, oilMat.clone());
+  const puddle = new THREE.Mesh(
+    new THREE.CircleGeometry(puddleRadius, 24),
+    oilMaterial.clone()
+  );
   puddle.rotation.x = -Math.PI / 2;
   puddle.position.set(pos.x, 0.018, pos.z);
   puddle.scale.set(1, 0.72, 1);
   puddle.userData.oilLiquid = true;
   puddle.userData.oilAge = 0;
   puddle.userData.oilPuddle = true;
-  puddle.userData.oilBorn = now;
-  scene.add(puddle);
+  puddle.userData.oilLife = 18;
 
-  if (typeof debris !== 'undefined' && Array.isArray(debris)) {
-    debris.push(puddle);
+  scene.add(puddle);
+  oilLiquids.push(puddle);
+}
+
+function stepOil(dt) {
+  // Update only the liquid collection. Never put these meshes in `debris`,
+  // because debris entries are expected to have Rapier rigid bodies.
+  for (let i = oilLiquids.length - 1; i >= 0; i--) {
+    const oil = oilLiquids[i];
+    if (!oil || !oil.parent) {
+      oilLiquids.splice(i, 1);
+      continue;
+    }
+
+    const u = oil.userData;
+    u.oilAge += dt;
+
+    if (u.oilPuddle) {
+      // Let the puddle slowly spread, then fade and clean itself up.
+      const spread = Math.min(1.45, 1 + u.oilAge * 0.12);
+      oil.scale.x = spread;
+      oil.scale.z = spread * 0.72;
+
+      const fadeStart = u.oilLife - 3;
+      if (u.oilAge > fadeStart) {
+        const a = Math.max(0, 1 - (u.oilAge - fadeStart) / 3);
+        oil.material.opacity = 0.92 * a;
+      }
+
+      if (u.oilAge >= u.oilLife) {
+        scene.remove(oil);
+        oil.geometry.dispose();
+        oil.material.dispose();
+        oilLiquids.splice(i, 1);
+      }
+      continue;
+    }
+
+    const v = u.oilVelocity;
+    v.y -= 9.8 * dt;
+
+    oil.position.x += v.x * dt;
+    oil.position.y += v.y * dt;
+    oil.position.z += v.z * dt;
+
+    // Hit the floor and become a tiny liquid blob instead of bouncing forever.
+    if (oil.position.y <= 0.035) {
+      oil.position.y = 0.035;
+      v.x *= 0.22;
+      v.z *= 0.22;
+      v.y = 0;
+
+      const s = Math.min(2.2, 1 + u.oilAge * 0.8);
+      oil.scale.set(1.35 * s, 0.35, 1.35 * s);
+      oil.userData.oilPuddle = true;
+      oil.userData.oilLife = 8 + Math.random() * 5;
+    }
+
+    // Remove stray airborne drops after a few seconds.
+    if (u.oilAge > 5) {
+      scene.remove(oil);
+      oil.geometry.dispose();
+      oil.material.dispose();
+      oilLiquids.splice(i, 1);
+    }
   }
 }
 
